@@ -6,7 +6,8 @@ Read `docs/brief-v0.1.md` and the current README before changing code.
 ## Commands
 
 - Setup: `uv sync --dev --python 3.11`
-- Demo: `uv run watchpost inspect examples/baseline.xml`
+- Inspect demo: `uv run watchpost inspect examples/baseline.xml`
+- Compare demo: `uv run watchpost compare examples/baseline.xml examples/after.xml --confirm-same-context`
 - Tests: `uv run python -m unittest discover -s tests -v`
 - Alternate test runner: `uv run pytest`
 - Format check: `uv run ruff format --check .`
@@ -26,6 +27,7 @@ Read `docs/brief-v0.1.md` and the current README before changing code.
 - Never scan, upload data, or make runtime network calls.
 - Parse XML with defusedxml. Never enable entities or external references.
 - Never interpret missing observations as confirmed closures or device removal.
+- Require human confirmation of scan context. Never claim metadata alone proves comparable conditions.
 - Never identify an application by port number alone.
 - Never silently overwrite reports or human notes.
 - Never commit credentials, private inventories, or real scan results.
