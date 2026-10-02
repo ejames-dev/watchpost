@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE nmaprun>
+<!-- Synthetic fixture. TCP 3000 changes from closed to open, one minute after baseline.xml. -->
+<nmaprun scanner="nmap" args="nmap -sT -p 22,80,443,3000 -oX after.xml 192.0.2.10 192.0.2.20" start="1767225660" version="7.95" xmloutputversion="1.05">
+  <scaninfo type="connect" protocol="tcp" numservices="4" services="22,80,443,3000"/>
+  <host starttime="1767225660" endtime="1767225661">
+    <status state="up" reason="user-set"/>
+    <address addr="192.0.2.10" addrtype="ipv4"/>
+    <ports>
+      <port protocol="tcp" portid="22"><state state="open" reason="syn-ack"/></port>
+      <port protocol="tcp" portid="80"><state state="closed" reason="conn-refused"/></port>
+      <port protocol="tcp" portid="443"><state state="open" reason="syn-ack"/></port>
+      <port protocol="tcp" portid="3000"><state state="open" reason="syn-ack"/></port>
+    </ports>
+  </host>
+  <host starttime="1767225660" endtime="1767225661">
+    <status state="up" reason="user-set"/>
+    <address addr="192.0.2.20" addrtype="ipv4"/>
+    <ports>
+      <extraports state="closed" count="3"><extrareasons reason="conn-refused" count="3"/></extraports>
+      <port protocol="tcp" portid="22"><state state="open" reason="syn-ack"/></port>
+    </ports>
+  </host>
+  <runstats>
+    <finished time="1767225661" elapsed="1.00" exit="success"/>
+    <hosts up="2" down="0" total="2"/>
+  </runstats>
+</nmaprun>
