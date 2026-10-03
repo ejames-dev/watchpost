@@ -16,3 +16,4 @@ reports/
 *.xml
 !examples/baseline.xml
 !examples/after.xml
+!examples/incomplete.xml

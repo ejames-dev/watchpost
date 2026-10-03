@@ -1,6 +1,8 @@
 include examples/baseline.xml
 include examples/after.xml
+include examples/incomplete.xml
 include examples/report.md
 include docs/brief-v0.1.md
 include docs/compare-milestone.md
 include docs/reporting-milestone.md
+include docs/scenarios.md

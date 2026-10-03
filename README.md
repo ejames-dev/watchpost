@@ -2,9 +2,10 @@
 
 Local-first, evidence-backed reviews of changes between saved Nmap scans.
 
-**Status: inspection, comparison, and Markdown reporting implemented.** Two saved XML files
-can now produce a change-review report. The three scenario walkthroughs remain unfinished.
-This is not a completed v0.1 release.
+**Status: inspection, comparison, Markdown reporting, and synthetic walkthroughs implemented.**
+Two saved XML files can produce a change-review report. The [three walkthroughs](docs/scenarios.md)
+cover expected deployment, unintended backend exposure, and an incomplete scan.
+The package remains a development build (`0.1.0.dev0`), not a tagged v0.1 release.
 
 ## Scope
 
@@ -119,6 +120,17 @@ or authenticate them. Paths appear as escaped literals so filename markup stays 
 Review real reports before sharing: they contain network details and are not anonymous.
 See [the reporting milestone](docs/reporting-milestone.md) for the safety checks and boundaries.
 
+## Practice the three scenarios
+
+Follow the [synthetic review walkthroughs](docs/scenarios.md). No live scan is required.
+
+1. **Expected deployment:** compare an observed change with an approved lab deployment plan.
+2. **Unintended backend exposure:** interpret the same evidence against a different access policy.
+3. **Incomplete scan:** confirm that a reported host timeout prevents report creation.
+
+The first two scenarios use the same XML pair deliberately. Watchpost reports evidence, not intent.
+The walkthroughs supply fictional context and clearly labeled example review notes.
+
 ## How inspection works
 
 1. Read the selected local file and reject inputs larger than 10 MiB.
@@ -157,7 +169,7 @@ The tests use the standard library's `unittest`. Pytest is an optional developme
 ## Data handling
 
 - Only inspect data from networks you own or have permission to assess.
-- Both bundled XML examples and the sample report are synthetic and use documentation-only IP addresses.
+- All bundled XML examples and the sample report are synthetic and use documentation-only IP addresses.
 - Keep real inputs in `scans/` and reports in `reports/`. Both directories are ignored by Git.
 - Reports are not automatically anonymous. Review files before publishing them.
 - Missing observations do not prove closed ports or removed devices.
@@ -169,6 +181,6 @@ The tests use the standard library's `unittest`. Pytest is an optional developme
 - [x] Safely inspect one saved IPv4/TCP scan.
 - [x] Validate and compare two snapshots without inventing missing evidence.
 - [x] Produce Markdown reports with evidence, limitations, and human review notes.
-- [ ] Document the three scenarios in the brief.
+- [x] Document the three scenarios in the brief.
 
 No dashboard, live scanning, scheduling, AI verdicts, or automatic remediation is planned for v0.1.
