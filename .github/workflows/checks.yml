@@ -56,7 +56,7 @@ jobs:
           expected = tomllib.loads(
               (Path(os.environ["GITHUB_WORKSPACE"]) / "pyproject.toml").read_text()
           )["project"]
-          installed = metadata("watchpost")
+          installed = metadata(expected["name"])
           assert installed["Version"] == expected["version"]
           assert installed["License-Expression"] == expected["license"]
           PY

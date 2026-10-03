@@ -3,7 +3,7 @@ requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "watchpost"
+name = "watchpost-cli"
 version = "0.1.0"
 description = "Local-first, evidence-backed reviews of changes between saved Nmap scans."
 readme = "README.md"

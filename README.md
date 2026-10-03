@@ -5,11 +5,20 @@ Local-first, evidence-backed reviews of changes between saved Nmap scans.
 **Status: inspection, comparison, Markdown reporting, and synthetic walkthroughs implemented.**
 Two saved XML files can produce a change-review report. The [three walkthroughs](docs/scenarios.md)
 cover expected deployment, unintended backend exposure, and an incomplete scan.
-**v0.1.0 is prepared for release, not yet tagged or published.**
+[Published releases](https://github.com/ejames-dev/watchpost/releases) are listed on GitHub.
+A source checkout can contain unreleased changes.
 See the [release notes](CHANGELOG.md) and [release-readiness checklist](docs/release-v0.1.0.md).
 
 **[User wiki](https://github.com/ejames-dev/watchpost/wiki)** — setup, report interpretation,
 scenarios, troubleshooting, and safety.
+
+## Package name
+
+The distribution name for PyPI and TestPyPI is **`watchpost-cli`**.
+The command and Python module remain `watchpost`. The GitHub repository remains `ejames-dev/watchpost`.
+The registry package named `watchpost` belongs to an unrelated project. Do not install it for this tool.
+Until registry publication is confirmed, use the source-checkout instructions below.
+See [publishing setup](docs/publishing.md) for the maintainer workflow.
 
 ## Scope
 

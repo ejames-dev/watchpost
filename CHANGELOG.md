@@ -1,9 +1,10 @@
 # Changelog
 
-## 0.1.0 — prepared, not yet released
+## 0.1.0
 
-Initial release candidate for local-first review of saved Nmap XML.
-This entry describes the proposed v0.1.0 release, not an existing tag or registry publication.
+Initial version for local-first review of saved Nmap XML.
+See [GitHub Releases](https://github.com/ejames-dev/watchpost/releases) for publication dates and assets.
+This changelog entry alone does not establish tag or registry publication.
 
 ### Included
 
@@ -16,6 +17,8 @@ This entry describes the proposed v0.1.0 release, not an existing tag or registr
 - Reject unsafe XML, unsupported inputs, incompatible scans, and reported host timeouts.
 - Provide three synthetic walkthroughs and a [user wiki](https://github.com/ejames-dev/watchpost/wiki).
 - Distribute Watchpost under the MIT license.
+- Use `watchpost-cli` as the distribution name, retaining the `watchpost` command and module.
+- Provide a manual, environment-approved Trusted Publishing workflow for TestPyPI and PyPI.
 
 ### Boundaries
 
