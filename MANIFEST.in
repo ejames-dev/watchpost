@@ -1,3 +1,6 @@
+include LICENSE
+include CHANGELOG.md
+include uv.lock
 include examples/baseline.xml
 include examples/after.xml
 include examples/incomplete.xml
@@ -6,3 +9,4 @@ include docs/brief-v0.1.md
 include docs/compare-milestone.md
 include docs/reporting-milestone.md
 include docs/scenarios.md
+include docs/release-v0.1.0.md

@@ -5,7 +5,11 @@ Local-first, evidence-backed reviews of changes between saved Nmap scans.
 **Status: inspection, comparison, Markdown reporting, and synthetic walkthroughs implemented.**
 Two saved XML files can produce a change-review report. The [three walkthroughs](docs/scenarios.md)
 cover expected deployment, unintended backend exposure, and an incomplete scan.
-The package remains a development build (`0.1.0.dev0`), not a tagged v0.1 release.
+**v0.1.0 is prepared for release, not yet tagged or published.**
+See the [release notes](CHANGELOG.md) and [release-readiness checklist](docs/release-v0.1.0.md).
+
+**[User wiki](https://github.com/ejames-dev/watchpost/wiki)** — setup, report interpretation,
+scenarios, troubleshooting, and safety.
 
 ## Scope
 
@@ -175,6 +179,11 @@ The tests use the standard library's `unittest`. Pytest is an optional developme
 - Missing observations do not prove closed ports or removed devices.
 - IP addresses are not device identities. Port numbers are not application identities.
 - An observed change does not prove vulnerability or compromise.
+
+## License
+
+Watchpost is licensed under the [MIT License](LICENSE).
+Third-party dependencies retain their own licenses.
 
 ## Roadmap
 

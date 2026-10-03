@@ -1,14 +1,21 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "watchpost"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Local-first, evidence-backed reviews of changes between saved Nmap scans."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = ["defusedxml>=0.7.1,<0.8"]
+
+[project.urls]
+Repository = "https://github.com/ejames-dev/watchpost"
+Documentation = "https://github.com/ejames-dev/watchpost/wiki"
+Issues = "https://github.com/ejames-dev/watchpost/issues"
 
 [project.scripts]
 watchpost = "watchpost:main"

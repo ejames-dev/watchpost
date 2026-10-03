@@ -40,3 +40,28 @@ jobs:
           uv run --offline watchpost compare examples/baseline.xml examples/after.xml \
             --confirm-same-context --output "$output_dir/report.md"
           diff -u examples/report.md "$output_dir/report.md"
+      - name: Build and smoke-test the installed wheel
+        run: |
+          uv build --out-dir "$RUNNER_TEMP/watchpost-dist"
+          uv venv "$RUNNER_TEMP/watchpost-wheel" --python "${{ matrix.python-version }}"
+          uv pip install --python "$RUNNER_TEMP/watchpost-wheel/bin/python" \
+            "$RUNNER_TEMP/watchpost-dist/"*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/watchpost-wheel/bin/python" -I - <<'PY'
+          import os
+          import tomllib
+          from importlib.metadata import metadata
+          from pathlib import Path
+
+          expected = tomllib.loads(
+              (Path(os.environ["GITHUB_WORKSPACE"]) / "pyproject.toml").read_text()
+          )["project"]
+          installed = metadata("watchpost")
+          assert installed["Version"] == expected["version"]
+          assert installed["License-Expression"] == expected["license"]
+          PY
+          "$RUNNER_TEMP/watchpost-wheel/bin/watchpost" inspect \
+            "$GITHUB_WORKSPACE/examples/baseline.xml"
+          "$RUNNER_TEMP/watchpost-wheel/bin/watchpost" compare \
+            "$GITHUB_WORKSPACE/examples/baseline.xml" "$GITHUB_WORKSPACE/examples/after.xml" \
+            --confirm-same-context --output "$RUNNER_TEMP/wheel-report.md"
