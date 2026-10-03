@@ -36,3 +36,7 @@ jobs:
         run: |
           uv run --offline watchpost inspect examples/baseline.xml
           uv run --offline watchpost compare examples/baseline.xml examples/after.xml --confirm-same-context
+          output_dir="$(mktemp -d)"
+          uv run --offline watchpost compare examples/baseline.xml examples/after.xml \
+            --confirm-same-context --output "$output_dir/report.md"
+          diff -u examples/report.md "$output_dir/report.md"

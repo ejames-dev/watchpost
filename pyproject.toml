@@ -14,7 +14,7 @@ dependencies = ["defusedxml>=0.7.1,<0.8"]
 watchpost = "watchpost:main"
 
 [tool.setuptools]
-py-modules = ["watchpost"]
+py-modules = ["watchpost", "watchpost_report"]
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.11"]

@@ -1,4 +1,4 @@
-"""Inspect saved Nmap observations without scanning or making network requests."""
+"""Inspect, compare, and report saved Nmap observations without network requests."""
 
 import argparse
 import re
@@ -10,6 +10,8 @@ from xml.etree.ElementTree import Element, ParseError
 
 from defusedxml import ElementTree
 from defusedxml.common import DefusedXmlException
+
+from watchpost_report import render_markdown, write_report
 
 # ponytail: cap snapshots at 10 MiB for small labs; stream if larger inputs are needed.
 MAX_XML_BYTES = 10 * 1024 * 1024
@@ -264,6 +266,9 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="Confirm the same scan location, intended targets, and other Nmap settings.",
     )
+    compare.add_argument(
+        "--output", type=Path, help="Save a Markdown report to a new file; never overwrite."
+    )
     args = parser.parse_args(argv)
     try:
         if args.command == "compare":
@@ -271,7 +276,11 @@ def main(argv: list[str] | None = None) -> int:
             changes = compare_snapshots(
                 before, after, same_context_confirmed=args.confirm_same_context
             )
-            print(_format_comparison(before, after, changes))
+            if args.output is None:
+                print(_format_comparison(before, after, changes))
+            else:
+                write_report(args.output, render_markdown(before, after, changes))
+                print(f"Report saved to {str(args.output)!a}")
             return 0
         inventory = read_inventory(args.snapshot)
     except (OSError, ValueError) as exc:

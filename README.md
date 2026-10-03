@@ -2,9 +2,9 @@
 
 Local-first, evidence-backed reviews of changes between saved Nmap scans.
 
-**Status: inspect and terminal comparison implemented.** The v0.1 target is two XML files in
-and one understandable Markdown report out. Markdown reports and the full scenario walkthroughs
-are not implemented yet. This is not a completed v0.1 release.
+**Status: inspection, comparison, and Markdown reporting implemented.** Two saved XML files
+can now produce a change-review report. The three scenario walkthroughs remain unfinished.
+This is not a completed v0.1 release.
 
 ## Scope
 
@@ -54,7 +54,8 @@ STATE CHANGE 192.0.2.10 3000/tcp: closed -> open
 ```
 
 The output includes both source paths, UTC scan windows, Nmap version, scan method,
-declared port count, differences, and limitations. Nothing is saved to a report file yet.
+declared port count, differences, and limitations. Without `--output`, the command prints
+only to the terminal.
 
 **Before using real inputs, confirm the same scan location, intended targets, and remaining
 Nmap settings.** The flag records your confirmation. It does not let Watchpost verify the
@@ -81,6 +82,42 @@ Comparison currently requires:
 A newly observed port is not proof that a service just started. A missing port is not proof of
 closure. Grouped records and uncertain states do not become guessed open/closed results.
 See the [comparison milestone](docs/compare-milestone.md) for boundaries and verification.
+
+## Save a Markdown report
+
+Create the output directory, then generate a report:
+
+```bash
+mkdir -p reports
+uv run --offline watchpost compare examples/baseline.xml examples/after.xml \
+  --confirm-same-context --output reports/review.md
+```
+
+Open `reports/review.md` in a text editor or Markdown viewer.
+See [the synthetic sample report](examples/report.md) for the expected result.
+
+Each report includes:
+
+- Source paths, UTC scan windows, scan metadata, and user-confirmed assumptions.
+- Separate counts for changed states, newly observed records, and records not observed later.
+- Each finding's address, numeric TCP port ID where applicable, and earlier/later source evidence.
+- Fixed-rule explanations and suggested checks. No AI verdicts or vulnerability scores.
+- Evidence limitations and blank fields for investigation notes and conclusions.
+
+**Existing files and notes are never overwritten.** If `reports/review.md` exists, choose a
+new filename, such as `reports/review-02.md`. There is no force-overwrite option.
+The same input paths and contents produce the same report content.
+
+Validation finishes before any report is created. Watchpost writes a private temporary file,
+then publishes the complete report with a non-replacing hard link. This also protects a destination
+created by another writer. The output directory must exist and its filesystem must support hard links.
+If it does not, the command fails instead of using an unsafe overwrite fallback.
+This workflow targets Linux and Ubuntu WSL. Use a trusted output directory.
+
+Keep the original XML files with your report. Reports reference the supplied files but do not embed
+or authenticate them. Paths appear as escaped literals so filename markup stays plain text.
+Review real reports before sharing: they contain network details and are not anonymous.
+See [the reporting milestone](docs/reporting-milestone.md) for the safety checks and boundaries.
 
 ## How inspection works
 
@@ -120,7 +157,7 @@ The tests use the standard library's `unittest`. Pytest is an optional developme
 ## Data handling
 
 - Only inspect data from networks you own or have permission to assess.
-- Both bundled XML examples are synthetic and use documentation-only IP addresses.
+- Both bundled XML examples and the sample report are synthetic and use documentation-only IP addresses.
 - Keep real inputs in `scans/` and reports in `reports/`. Both directories are ignored by Git.
 - Reports are not automatically anonymous. Review files before publishing them.
 - Missing observations do not prove closed ports or removed devices.
@@ -131,7 +168,7 @@ The tests use the standard library's `unittest`. Pytest is an optional developme
 
 - [x] Safely inspect one saved IPv4/TCP scan.
 - [x] Validate and compare two snapshots without inventing missing evidence.
-- [ ] Produce Markdown reports with evidence, limitations, and human review notes.
+- [x] Produce Markdown reports with evidence, limitations, and human review notes.
 - [ ] Document the three scenarios in the brief.
 
 No dashboard, live scanning, scheduling, AI verdicts, or automatic remediation is planned for v0.1.
