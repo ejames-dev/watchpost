@@ -230,6 +230,16 @@ class ReportCommandTests(unittest.TestCase):
                 self.assertNotIn("Traceback", stderr)
                 self.assertEqual(list(self.directory.iterdir()), [bad])
 
+    def test_incomplete_walkthrough_creates_no_report(self):
+        code, stdout, stderr = self.run_report(after=EXAMPLES / "incomplete.xml")
+        self.assertEqual(code, 2)
+        self.assertEqual(stdout, "")
+        self.assertEqual(
+            stderr,
+            "watchpost: error: Host scan is incomplete (timeout). Use a completed snapshot.\n",
+        )
+        self.assertEqual(list(self.directory.iterdir()), [])
+
     def test_existing_notes_and_input_aliases_are_not_overwritten(self):
         for content in (
             "Human investigation notes: keep this conclusion.\n",
