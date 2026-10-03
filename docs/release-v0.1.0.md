@@ -1,6 +1,7 @@
 # v0.1.0 release readiness
 
-Status: local release-readiness checks passed on 2026-10-03. PR review and CI remain required.
+Local release-readiness checks passed on 2026-10-03.
+Check the current PR and post-merge CI results before publishing a specific revision.
 No release tag or registry publication is authorized by this checklist.
 The package metadata targets `0.1.0`. That value alone does not mean a release exists.
 
@@ -71,7 +72,7 @@ Build and dependency installation can use the network. Watchpost must not use it
 
 ## Audit status
 
-Local results on 2026-10-03:
+Original release-preparation results on 2026-10-03:
 
 | Check | Result |
 |---|---|
@@ -106,16 +107,28 @@ The self-review covered XML parsing, evidence interpretation, report-path escapi
 The runtime modules are unchanged by release preparation.
 Independent reviewer tools were unavailable. This is not a comprehensive independent security audit or a guarantee of safety.
 
+## Registry preparation follow-up
+
+The user selected `watchpost-cli` because `watchpost` is occupied on both PyPI and TestPyPI.
+The repository, command, and import module retain the Watchpost name.
+The name correction adds an installed-metadata/entry-point regression test: 51 tests pass on Python 3.11–3.13.
+The new `publish.yml` workflow is manual-only, with publishing identity permission limited to the environment-approved upload job.
+Its YAML, shell syntax, ref/name rejection cases, build, Twine checks, wheel smoke, and checksum steps passed local checks.
+No upload or OIDC exchange ran during those checks. Docker/act and independent reviewer tools were unavailable.
+Successful trusted publishing still requires the account-side configuration and an approved live upload.
+See [the exact publisher settings and sequence](publishing.md).
+
 ## Before tagging or publishing
 
 1. Review and merge the release-preparation PR through the normal repository workflow.
 2. Wait for successful post-merge CI and sync a clean local `main`.
 3. Obtain explicit approval for the release tag and publication destination.
-4. Update release-status text with the actual release date and state.
+4. Confirm that the release notes accurately describe the approved version.
 5. Rebuild and verify artifacts from the exact approved release commit.
 6. Create and verify the signed `v0.1.0` tag only after approval.
 7. Publish the approved release notes and artifacts, then confirm the public result.
 8. Update the wiki's status to match the published release.
 
 Do not reuse artifacts built before the final commit.
-No PyPI upload is part of this preparation. A registry release needs separate authorization and name/ownership checks.
+Registry uploads need the account setup in [publishing.md](publishing.md) and separate explicit approval.
+The registry workflows do not run automatically when a tag or GitHub Release is created.
