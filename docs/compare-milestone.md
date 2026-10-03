@@ -3,7 +3,8 @@
 ## Goal
 
 Add `watchpost compare BEFORE AFTER --confirm-same-context` without changing the existing inspect output.
-Print a deterministic, evidence-linked terminal comparison. Markdown reports remain the next milestone.
+Print a deterministic, evidence-linked terminal comparison.
+The later [reporting milestone](reporting-milestone.md) adds optional Markdown output.
 
 ## Impact and implementation
 
@@ -48,7 +49,8 @@ Run the existing suite, Ruff, package checks, and Python 3.11/3.12/3.13 CI.
 This milestone does not parse or compare the entire Nmap command line. Human confirmation covers
 settings and environment that the automated checks do not establish. Equal metadata is not proof
 of an equivalent measurement. Hostnames, application identities, grouped port states, and script
-output remain outside the diff. No automatic scans, output files, or security verdicts.
+output remain outside the diff. No automatic scans or security verdicts.
+Comparison writes only to the terminal unless `--output` selects a new report file.
 
 Nmap already provides scanning and Ndiff provides raw comparisons. This project adds conservative
 validation, explicit limitations, and a review workflow rather than a replacement scanner.
