@@ -55,7 +55,7 @@ No stored PyPI password or API token is used.
 Creating a tag or GitHub Release does not trigger it.
 
 - **TestPyPI:** choose branch `main` and registry `testpypi`.
-- **PyPI:** choose the existing release tag, such as `v0.1.0`, and registry `pypi`.
+- **PyPI:** choose the existing release tag, such as `v0.0.1`, and registry `pypi`.
 
 The workflow rejects unexpected package names and refs before installing project dependencies.
 A PyPI tag must match the package version exactly and point to a commit reachable from `main`.
@@ -84,7 +84,7 @@ Confirm the public registry result after a successful upload.
 
 ## Verify a TestPyPI installation
 
-After version `0.1.0` exists on TestPyPI, use a new virtual environment outside the repository.
+After version `0.0.1` exists on TestPyPI, use a new virtual environment outside the repository.
 If the path below already exists, choose a fresh environment path before running these commands:
 
 ```bash
@@ -92,7 +92,7 @@ python3 -m venv /tmp/watchpost-testpypi-check
 /tmp/watchpost-testpypi-check/bin/python -m pip install \
   --index-url https://pypi.org/simple/ 'defusedxml==0.7.1'
 /tmp/watchpost-testpypi-check/bin/python -m pip install \
-  --no-deps --index-url https://test.pypi.org/simple/ 'watchpost-cli==0.1.0'
+  --no-deps --index-url https://test.pypi.org/simple/ 'watchpost-cli==0.0.1'
 /tmp/watchpost-testpypi-check/bin/python -m pip check
 /tmp/watchpost-testpypi-check/bin/python -I -c \
   'from importlib.metadata import version; print(version("watchpost-cli"))'

@@ -9,5 +9,5 @@ include docs/brief-v0.1.md
 include docs/compare-milestone.md
 include docs/reporting-milestone.md
 include docs/scenarios.md
-include docs/release-v0.1.0.md
+include docs/release-v0.0.1.md
 include docs/publishing.md

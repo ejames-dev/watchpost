@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.1.0
+## 0.0.1
 
 Initial version for local-first review of saved Nmap XML.
+Delivers the scope of the [v0.1 project brief](docs/brief-v0.1.md).
 See [GitHub Releases](https://github.com/ejames-dev/watchpost/releases) for publication dates and assets.
 This changelog entry alone does not establish tag or registry publication.
 
@@ -31,6 +32,6 @@ No live scanning, scheduling, dashboard, packet capture, UDP/IPv6 support, AI ve
 
 ### Verification
 
-See [the release-readiness checklist](docs/release-v0.1.0.md).
+See [the release-readiness checklist](docs/release-v0.0.1.md).
 The package version alone does not prove publication.
 Published releases, when available, appear on [GitHub Releases](https://github.com/ejames-dev/watchpost/releases).
