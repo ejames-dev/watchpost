@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "watchpost-cli"
-version = "0.1.0"
+version = "0.0.1"
 description = "Local-first, evidence-backed reviews of changes between saved Nmap scans."
 readme = "README.md"
 license = "MIT"

@@ -7,7 +7,7 @@ Two saved XML files can produce a change-review report. The [three walkthroughs]
 cover expected deployment, unintended backend exposure, and an incomplete scan.
 [Published releases](https://github.com/ejames-dev/watchpost/releases) are listed on GitHub.
 A source checkout can contain unreleased changes.
-See the [release notes](CHANGELOG.md) and [release-readiness checklist](docs/release-v0.1.0.md).
+See the [release notes](CHANGELOG.md) and [release-readiness checklist](docs/release-v0.0.1.md).
 
 **[User wiki](https://github.com/ejames-dev/watchpost/wiki)** — setup, report interpretation,
 scenarios, troubleshooting, and safety.
@@ -201,4 +201,4 @@ Third-party dependencies retain their own licenses.
 - [x] Produce Markdown reports with evidence, limitations, and human review notes.
 - [x] Document the three scenarios in the brief.
 
-No dashboard, live scanning, scheduling, AI verdicts, or automatic remediation is planned for v0.1.
+No dashboard, live scanning, scheduling, AI verdicts, or automatic remediation is planned in the v0.1 brief.

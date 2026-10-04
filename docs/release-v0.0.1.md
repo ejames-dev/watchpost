@@ -1,13 +1,14 @@
-# v0.1.0 release readiness
+# v0.0.1 release readiness
 
-Local release-readiness checks passed on 2026-10-03.
+Local release-readiness checks passed on 2026-10-04.
 Check the current PR and post-merge CI results before publishing a specific revision.
 No release tag or registry publication is authorized by this checklist.
-The package metadata targets `0.1.0`. That value alone does not mean a release exists.
+The package metadata targets `0.0.1`. That value alone does not mean a release exists.
 
 ## Scope and evidence
 
-The [approved brief](brief-v0.1.md) defines the release scope.
+The [approved v0.1 brief](brief-v0.1.md) defines the release scope.
+The first release uses version `0.0.1` instead of `0.1.0`. The scope is unchanged.
 The [changelog](../CHANGELOG.md) describes the proposed release.
 
 | Requirement | Evidence in the repository |
@@ -23,7 +24,7 @@ The [changelog](../CHANGELOG.md) describes the proposed release.
 
 ## Preparation changes
 
-- Set package version to `0.1.0` and update the lockfile.
+- Set package version to `0.0.1` and update the lockfile.
 - Add the user-selected MIT license and package license metadata.
 - Require Setuptools 77.0.3 or newer for modern license metadata.
 - Include the license, changelog, lockfile, and release checklist in the source archive.
@@ -72,24 +73,27 @@ Build and dependency installation can use the network. Watchpost must not use it
 
 ## Audit status
 
-Original release-preparation results on 2026-10-03:
+Release-preparation results for `0.0.1` on 2026-10-04:
 
 | Check | Result |
 |---|---|
-| Unittest suite | 50 tests passed on Python 3.11, 3.12, and 3.13 |
-| Pytest | 50 tests and 125 subtests passed |
+| Unittest suite | 51 tests passed on Python 3.11, 3.12, and 3.13 |
+| Pytest | 51 tests and 125 subtests passed |
 | Ruff format and lint | Passed |
 | Locked dependency installation | Passed in the checkout and extracted source archive |
-| Source archive and wheel | Built successfully, version `0.1.0`, MIT license present |
+| Source archive and wheel | Built successfully, version `0.0.1`, MIT license present |
+| Twine metadata check | `twine check --strict` passed for both archives |
 | Archive contents | Required docs/examples/tests/lock present, no private data directories |
-| Extracted source archive | All 50 tests passed |
+| Extracted source archive | All 51 tests passed |
 | Installed wheel outside checkout | Help, invalid arguments, inspect, compare, and report checks passed |
 | Report safety | Sample bytes matched, existing notes preserved, timeout created no report |
 | Offline behavior | Installed-code comparison passed with network entry points disabled |
-| New CI shell step | Executed locally without modification except the Python matrix value |
 | Package consistency | `uv pip check` passed for the installed wheel environment |
 | Dependency advisory check | No known vulnerabilities reported for seven locked Linux runtime/dev dependencies |
 | Self-review | No release-blocking correctness, security, performance, or clarity findings identified |
+
+The same checks passed on 2026-10-03 when the metadata targeted `0.1.0`.
+Only version metadata and release documentation changed for `0.0.1`.
 
 The advisory check used `pip-audit` with the PyPI service and made no dependency changes.
 It sent package names and versions, not scan data. It does not cover every build tool or platform-specific dependency.
@@ -125,7 +129,7 @@ See [the exact publisher settings and sequence](publishing.md).
 3. Obtain explicit approval for the release tag and publication destination.
 4. Confirm that the release notes accurately describe the approved version.
 5. Rebuild and verify artifacts from the exact approved release commit.
-6. Create and verify the signed `v0.1.0` tag only after approval.
+6. Create and verify the signed `v0.0.1` tag only after approval.
 7. Publish the approved release notes and artifacts, then confirm the public result.
 8. Update the wiki's status to match the published release.
 
