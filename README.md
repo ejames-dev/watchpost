@@ -17,8 +17,21 @@ scenarios, troubleshooting, and safety.
 The distribution name for PyPI and TestPyPI is **`watchpost-cli`**.
 The command and Python module remain `watchpost`. The GitHub repository remains `ejames-dev/watchpost`.
 The registry package named `watchpost` belongs to an unrelated project. Do not install it for this tool.
-Until registry publication is confirmed, use the source-checkout instructions below.
 See [publishing setup](docs/publishing.md) for the maintainer workflow.
+
+## Install from PyPI
+
+Version `0.0.1` is published on [PyPI](https://pypi.org/project/watchpost-cli/0.0.1/).
+With Python 3.11+, install it into a virtual environment:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install 'watchpost-cli==0.0.1'
+.venv/bin/watchpost --help
+```
+
+The package does not include the synthetic example files.
+To run the demos below, use a source checkout.
 
 ## Scope
 
