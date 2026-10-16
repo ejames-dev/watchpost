@@ -35,12 +35,12 @@ Cut order if short on time: the "different policy" step first.
 
 ## Checklist
 
-- [ ] Confirm submission form fields and any extra requirements (for example a manual-setup section)
+- [ ] Confirm the submission form fields (short form plus a link to the build)
 - [ ] Rehearse `scripts/demo.sh` at least 3 times with a timer
 - [ ] Large terminal font, clean prompt, high contrast
 - [ ] Record a 2-3 minute fallback video of `--auto`; keep a local copy for offline use
 - [ ] Confirm `watchpost-cli` is published before claiming `pip install`; otherwise show the source checkout
-- [ ] README: manual setup steps verified from a fresh clone
+- [ ] README quick-start verified from a fresh clone
 - [ ] Draft the form text: one-paragraph description, repo link, video link
 - [ ] Test screen share or HDMI at the venue; bring the video offline
 
