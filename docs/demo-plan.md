@@ -39,7 +39,8 @@ Cut order if short on time: the "different policy" step first.
 - [ ] Rehearse `scripts/demo.sh` at least 3 times with a timer
 - [ ] Large terminal font, clean prompt, high contrast
 - [ ] Record a 2-3 minute fallback video of `--auto`; keep a local copy for offline use
-- [ ] Confirm `watchpost-cli` is published before claiming `pip install`; otherwise show the source checkout
+- [x] `watchpost-cli` 0.0.1 is on PyPI and `inspect`/`compare` work from a clean venv (checked 2026-10-16). The bundled example XML is only in the repo, so the demo still needs a checkout
+- [ ] Speaker script: `docs/demo-script.md`. Submission text: `docs/submission-draft.md`
 - [ ] README quick-start verified from a fresh clone
 - [ ] Draft the form text: one-paragraph description, repo link, video link
 - [ ] Test screen share or HDMI at the venue; bring the video offline
