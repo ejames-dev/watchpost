@@ -4,5 +4,7 @@
   "compatibility_date": "2026-10-01",
   "assets": {
     "directory": "./site"
-  }
+  },
+  // Required by `wrangler preview`, which Workers Builds runs for non-production branches.
+  "previews": {}
 }
