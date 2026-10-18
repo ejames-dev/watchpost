@@ -35,7 +35,7 @@ To run the demos below, use a source checkout.
 
 ## Browser version
 
-**Try it: <https://watchpost.evanjames010101.workers.dev>**
+**Try it: <https://getwatchpost.dev>**
 No install needed. Use only scans of networks you are authorized to assess.
 
 `web/` builds a static page that runs the same comparison in the browser with
