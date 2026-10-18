@@ -35,6 +35,9 @@ To run the demos below, use a source checkout.
 
 ## Browser version
 
+**Try it: <https://watchpost.evanjames010101.workers.dev>**
+No install needed. Use only scans of networks you are authorized to assess.
+
 `web/` builds a static page that runs the same comparison in the browser with
 [Pyodide](https://pyodide.org/). Scan files stay in the browser tab: everything is served
 from one origin, and a content security policy blocks requests to other sites.
