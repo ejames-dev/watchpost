@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `compare_report` and `parse_snapshot` validate and compare snapshots held in memory.
+- Static browser build in `web/` using self-hosted Pyodide, with a same-origin-only
+  content security policy and a Node smoke test. See [the browser build guide](docs/web.md).
+
 ## 0.0.1
 
 Initial version for local-first review of saved Nmap XML.

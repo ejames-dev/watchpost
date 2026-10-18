@@ -13,6 +13,7 @@ Read `docs/brief-v0.1.md` and the current README before changing code.
 - Alternate test runner: `uv run pytest`
 - Format check: `uv run ruff format --check .`
 - Lint: `uv run ruff check .`
+- Browser build: `bash web/build.sh site`, then `node web/smoke.mjs site`
 
 ## Conventions
 
@@ -28,6 +29,8 @@ Read `docs/brief-v0.1.md` and the current README before changing code.
 ## Boundaries
 
 - Never scan, upload data, or make runtime network calls.
+- In `web/`, serve every runtime file from the same origin. Never add a CDN, analytics,
+  or any endpoint that receives scan data. Keep `connect-src 'self'` in `web/_headers`.
 - Parse XML with defusedxml. Never enable entities or external references.
 - Never interpret missing observations as confirmed closures or device removal.
 - Require human confirmation of scan context. Never claim metadata alone proves comparable conditions.

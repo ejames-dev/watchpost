@@ -1,0 +1,8 @@
+// Assets-only Worker for the browser build. No Worker script runs, so web/_headers applies.
+{
+  "name": "watchpost",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./site"
+  }
+}
