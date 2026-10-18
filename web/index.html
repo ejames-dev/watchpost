@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Watchpost — compare saved Nmap scans</title>
+  <meta name="description" content="Compare two saved Nmap XML scans in your browser. Files never leave this page.">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="mark">watchpost</p>
+      <h1>Compare two saved Nmap scans</h1>
+      <p class="lede">
+        Evidence-backed change review for authorized home labs and coursework networks.
+        Runs entirely in this browser tab. Your scan files are never uploaded.
+      </p>
+    </header>
+
+    <form id="compare" novalidate>
+      <div class="drops">
+        <label class="drop" data-slot="before">
+          <span class="step">1</span>
+          <span class="drop-title">Earlier scan</span>
+          <span class="drop-file" data-empty="Choose or drop an Nmap XML export">Choose or drop an Nmap XML export</span>
+          <input type="file" name="before" accept=".xml,application/xml,text/xml">
+        </label>
+        <label class="drop" data-slot="after">
+          <span class="step">2</span>
+          <span class="drop-title">Later scan</span>
+          <span class="drop-file" data-empty="Choose or drop an Nmap XML export">Choose or drop an Nmap XML export</span>
+          <input type="file" name="after" accept=".xml,application/xml,text/xml">
+        </label>
+      </div>
+
+      <label class="confirm">
+        <input type="checkbox" name="confirmed">
+        <span>
+          Both scans used the same scan location, intended targets, and other Nmap settings.
+          <small>Watchpost records this confirmation. It cannot verify it.</small>
+        </span>
+      </label>
+
+      <div class="actions">
+        <button type="submit" disabled>Compare</button>
+        <p id="status" role="status" aria-live="polite">Loading the Python runtime…</p>
+      </div>
+    </form>
+
+    <section id="result" hidden>
+      <div class="result-bar">
+        <h2>Report</h2>
+        <div class="result-actions">
+          <button type="button" id="copy" class="secondary">Copy</button>
+          <button type="button" id="download" class="secondary">Download .md</button>
+        </div>
+      </div>
+      <pre id="report" tabindex="0"></pre>
+    </section>
+
+    <section id="error" hidden role="alert">
+      <h2>Comparison refused</h2>
+      <p id="error-text"></p>
+    </section>
+
+    <footer>
+      <p>
+        <strong>How this stays local:</strong> Watchpost's Python code runs in WebAssembly via
+        Pyodide, served from this site. There is no upload endpoint, and the page's content
+        security policy blocks sending data to any other site.
+      </p>
+      <p>
+        Observations, not a security verdict. Only compare scans of networks you are authorized
+        to test. Prefer a terminal?
+        <a href="https://pypi.org/project/watchpost-cli/">pip install watchpost-cli</a> ·
+        <a href="https://github.com/ejames-dev/watchpost">Source</a> ·
+        <a href="https://github.com/ejames-dev/watchpost/wiki">Wiki</a>
+      </p>
+    </footer>
+  </main>
+</body>
+</html>

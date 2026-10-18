@@ -33,6 +33,13 @@ python3 -m venv .venv
 The package does not include the synthetic example files.
 To run the demos below, use a source checkout.
 
+## Browser version
+
+`web/` builds a static page that runs the same comparison in the browser with
+[Pyodide](https://pyodide.org/). Scan files stay in the browser tab: everything is served
+from one origin, and a content security policy blocks requests to other sites.
+It is intended for Cloudflare Pages. See [the browser build guide](docs/web.md).
+
 ## Scope
 
 Watchpost is for students and home-lab operators working on authorized networks.
@@ -213,5 +220,6 @@ Third-party dependencies retain their own licenses.
 - [x] Validate and compare two snapshots without inventing missing evidence.
 - [x] Produce Markdown reports with evidence, limitations, and human review notes.
 - [x] Document the three scenarios in the brief.
+- [x] Run comparisons in the browser without uploading scans.
 
 No dashboard, live scanning, scheduling, AI verdicts, or automatic remediation is planned in the v0.1 brief.
