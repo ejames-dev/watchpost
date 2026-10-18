@@ -41,7 +41,9 @@ only for a quick look. Cloudflare applies the headers on deployment.
 4. Deploy command: `npx wrangler deploy` (the default).
 5. Deploy, then add a custom domain under the Worker's **Settings → Domains & Routes**.
 
-Keep Cloudflare Web Analytics and other injected scripts disabled for this project.
+Keep Cloudflare Web Analytics, Real User Measurements (**Speed → Real user monitoring →
+Disable completely**), and other injected scripts disabled for this project. A new custom
+domain starts with RUM in a default mode that injects Cloudflare's beacon script.
 The content security policy blocks them, and they would weaken the "no third parties" claim.
 
 ## Updating pinned versions
