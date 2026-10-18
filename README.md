@@ -38,7 +38,7 @@ To run the demos below, use a source checkout.
 `web/` builds a static page that runs the same comparison in the browser with
 [Pyodide](https://pyodide.org/). Scan files stay in the browser tab: everything is served
 from one origin, and a content security policy blocks requests to other sites.
-It is intended for Cloudflare Pages. See [the browser build guide](docs/web.md).
+It deploys to Cloudflare as an assets-only Worker. See [the browser build guide](docs/web.md).
 
 ## Scope
 

@@ -27,16 +27,19 @@ python3 -m http.server -d site 8000
 
 The smoke test loads the built Pyodide runtime in Node and checks that the browser report is
 byte-identical to `examples/report.md`. `http.server` does not apply `_headers`, so use it
-only for a quick look. Cloudflare Pages applies the headers on deployment.
+only for a quick look. Cloudflare applies the headers on deployment.
 
-## Deploy to Cloudflare Pages
+## Deploy to Cloudflare
 
-1. In the Cloudflare dashboard, open **Workers & Pages → Create → Pages → Connect to Git**
+`wrangler.jsonc` deploys `site/` as an assets-only Worker. No Worker script runs, so
+`_headers` applies to every response. Static asset requests are free on the Workers Free plan.
+
+1. In the Cloudflare dashboard, open **Workers & Pages → Create → Import a repository**
    and select `ejames-dev/watchpost`.
-2. Framework preset: **None**.
+2. Project name: `watchpost` (must match `name` in `wrangler.jsonc`).
 3. Build command: `bash web/build.sh site`
-4. Build output directory: `site`
-5. Deploy, then add a custom domain under the project's **Custom domains** tab if wanted.
+4. Deploy command: `npx wrangler deploy` (the default).
+5. Deploy, then add a custom domain under the Worker's **Settings → Domains & Routes**.
 
 Keep Cloudflare Web Analytics and other injected scripts disabled for this project.
 The content security policy blocks them, and they would weaken the "no third parties" claim.
