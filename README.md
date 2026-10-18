@@ -44,7 +44,9 @@ It deploys to Cloudflare as an assets-only Worker. See [the browser build guide]
 
 Watchpost is for students and home-lab operators working on authorized networks.
 Inspect a saved Nmap XML file or compare two snapshots of explicit IPv4/TCP observations.
-Watchpost does not launch Nmap, discover devices, or make network requests.
+Watchpost does not launch Nmap, discover devices, or send scan data anywhere.
+The CLI makes no network requests. The browser version only loads its own code from the
+site that serves it.
 
 The approved target is in [the v0.1 project brief](docs/brief-v0.1.md).
 
@@ -220,6 +222,10 @@ Third-party dependencies retain their own licenses.
 - [x] Validate and compare two snapshots without inventing missing evidence.
 - [x] Produce Markdown reports with evidence, limitations, and human review notes.
 - [x] Document the three scenarios in the brief.
-- [x] Run comparisons in the browser without uploading scans.
 
 No dashboard, live scanning, scheduling, AI verdicts, or automatic remediation is planned in the v0.1 brief.
+
+Beyond the v0.1 brief:
+
+- [x] Run comparisons in the browser without uploading scans. The CLI still needs no account
+  or cloud service; the hosted page needs only the static site that serves it.
