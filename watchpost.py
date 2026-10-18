@@ -38,11 +38,15 @@ class Change:
 
 
 def _read_root(path: Path) -> Element:
-    """Safely load a completed TCP Nmap export without resolving external content."""
+    """Safely load a completed TCP Nmap export file without resolving external content."""
     if not path.is_file():
         raise ValueError("Snapshot must be an existing regular file. Check the input path.")
     with path.open("rb") as source:
-        data = source.read(MAX_XML_BYTES + 1)
+        return _parse_root(source.read(MAX_XML_BYTES + 1))
+
+
+def _parse_root(data: bytes) -> Element:
+    """Safely parse completed TCP Nmap XML bytes without resolving external content."""
     if len(data) > MAX_XML_BYTES:
         raise ValueError("Snapshot exceeds the 10 MiB limit. Use a smaller lab snapshot.")
     try:
@@ -139,7 +143,15 @@ def _port_coverage(services: str) -> frozenset[int]:
 
 def read_snapshot(path: Path) -> Snapshot:
     """Read the stronger metadata needed for a conservative comparison."""
-    root = _read_root(path)
+    return _snapshot_from_root(_read_root(path), path)
+
+
+def parse_snapshot(data: bytes, source: Path) -> Snapshot:
+    """Validate snapshot bytes already in memory; source is only a label for output."""
+    return _snapshot_from_root(_parse_root(data), source)
+
+
+def _snapshot_from_root(root: Element, source: Path) -> Snapshot:
     inventory = _inventory_from_xml(root)
     scans = root.findall("scaninfo")
     if len(scans) != 1 or scans[0].get("type") not in {"connect", "syn"}:
@@ -160,7 +172,9 @@ def read_snapshot(path: Path) -> Snapshot:
     for ports in inventory.values():
         if not set(ports).issubset(coverage):
             raise ValueError("Explicit port observations fall outside the declared TCP coverage.")
-    return Snapshot(path, started, finished, scans[0].attrib["type"], version, coverage, inventory)
+    return Snapshot(
+        source, started, finished, scans[0].attrib["type"], version, coverage, inventory
+    )
 
 
 def compare_snapshots(
@@ -207,6 +221,25 @@ def compare_snapshots(
             if old_state != new_state:
                 changes.append(Change(address, port, old_state, new_state))
     return changes
+
+
+def compare_report(
+    before_xml: bytes,
+    after_xml: bytes,
+    *,
+    before_name: str,
+    after_name: str,
+    same_context_confirmed: bool = False,
+) -> str:
+    """Return the Markdown report for two in-memory snapshots. No file or network access."""
+    if not same_context_confirmed:
+        raise ValueError(
+            "Confirm the same scan location, intended targets, and other scan settings."
+        )
+    before = parse_snapshot(before_xml, Path(before_name))
+    after = parse_snapshot(after_xml, Path(after_name))
+    changes = compare_snapshots(before, after, same_context_confirmed=same_context_confirmed)
+    return render_markdown(before, after, changes)
 
 
 def _format_comparison(before: Snapshot, after: Snapshot, changes: list[Change]) -> str:
