@@ -58,10 +58,12 @@ The report matches the [bundled sample](../examples/report.md).
 | Port state changed | 1 |
 | All other observation categories | 0 |
 | Record | IPv4 `192.0.2.10`, TCP port `3000` |
-| Earlier evidence | `closed` |
-| Later evidence | `open` |
+| Earlier evidence | `closed`, reason `conn-refused` |
+| Later evidence | `open`, reason `syn-ack` |
+| Host status | `up`, reason `user-set`, in both snapshots |
 
 Both values come from explicit `<port>` records, not grouped counts.
+The reasons show how Nmap classified each state. They do not explain why the port opened.
 The report does not say when the change happened or which process caused it.
 
 ### Review the finding

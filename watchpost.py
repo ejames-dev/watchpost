@@ -2,9 +2,11 @@
 
 import argparse
 import re
-from dataclasses import dataclass
+from collections.abc import Iterable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from ipaddress import IPv4Address
+from itertools import groupby
 from pathlib import Path
 from xml.etree.ElementTree import Element, ParseError
 
@@ -16,6 +18,12 @@ from watchpost_report import render_markdown, write_report
 # ponytail: cap snapshots at 10 MiB for small labs; stream if larger inputs are needed.
 MAX_XML_BYTES = 10 * 1024 * 1024
 PORT_STATES = {"open", "closed", "filtered", "unfiltered", "open|filtered", "closed|filtered"}
+HOST_STATES = {"up", "down", "unknown", "skipped"}
+
+# Address -> TCP port -> a value copied from that explicit <port> record.
+PortRecords = dict[str, dict[int, str]]
+# Address -> (status, reason) copied from the host's <status> record, when there is one.
+HostStatus = dict[str, tuple[str, str | None]]
 
 
 @dataclass(frozen=True)
@@ -27,6 +35,9 @@ class Snapshot:
     version: str
     coverage: frozenset[int]
     inventory: dict[str, dict[int, str]]
+    # Evidence shown beside findings. It never changes how observations are compared.
+    port_reasons: PortRecords = field(default_factory=dict)
+    host_status: HostStatus = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -72,8 +83,19 @@ def _parse_root(data: bytes) -> Element:
     return root
 
 
-def _inventory_from_xml(root: Element) -> dict[str, dict[int, str]]:
-    inventory = {}
+def _reason(element: Element, record: str) -> str | None:
+    """Return Nmap's recorded reason token. Reasons are evidence, never classifications."""
+    reason = element.get("reason")
+    if reason is not None and not re.fullmatch(r"[a-z][a-z-]{0,39}", reason):
+        raise ValueError(f"Unrecognized Nmap reason for {record}. Expected a token like syn-ack.")
+    return reason
+
+
+def _records_from_xml(root: Element) -> tuple[PortRecords, PortRecords, HostStatus]:
+    """Read explicit port states, plus the reasons and host status Nmap recorded with them."""
+    inventory: PortRecords = {}
+    port_reasons: PortRecords = {}
+    host_status: HostStatus = {}
     for host in root.findall("host"):
         if host.get("timedout") not in (None, "false", "0"):
             raise ValueError("Host scan is incomplete (timeout). Use a completed snapshot.")
@@ -88,8 +110,16 @@ def _inventory_from_xml(root: Element) -> dict[str, dict[int, str]]:
             raise ValueError("Invalid IPv4 address. Check the host address in the export.") from exc
         if address in inventory:
             raise ValueError(f"Duplicate IPv4 host {address}. Use an unambiguous snapshot.")
+        statuses = host.findall("status")
+        if len(statuses) > 1 or any(status.get("state") not in HOST_STATES for status in statuses):
+            raise ValueError(
+                f"Host {address} must have at most one status: up, down, unknown, or skipped."
+            )
+        if statuses:
+            reason = _reason(statuses[0], f"host {address}")
+            host_status[address] = (statuses[0].attrib["state"], reason)
 
-        ports = {}
+        ports, reasons = {}, {}
         for port in host.findall("ports/port"):
             if port.get("protocol") != "tcp":
                 raise ValueError("Only TCP port observations are supported.")
@@ -105,13 +135,17 @@ def _inventory_from_xml(root: Element) -> dict[str, dict[int, str]]:
             if len(states) != 1 or states[0].get("state") not in PORT_STATES:
                 raise ValueError("Each explicit port must have one recognized Nmap port state.")
             ports[number] = states[0].attrib["state"]
+            reason = _reason(states[0], f"{address} {number}/tcp")
+            if reason is not None:
+                reasons[number] = reason
         inventory[address] = ports
-    return inventory
+        port_reasons[address] = reasons
+    return inventory, port_reasons, host_status
 
 
 def read_inventory(path: Path) -> dict[str, dict[int, str]]:
     """Read explicit IPv4/TCP observations. Do not expand aggregated port counts."""
-    return _inventory_from_xml(_read_root(path))
+    return _records_from_xml(_read_root(path))[0]
 
 
 def _scan_time(value: str) -> datetime:
@@ -141,6 +175,18 @@ def _port_coverage(services: str) -> frozenset[int]:
     return frozenset(ports)
 
 
+def _port_ranges(ports: Iterable[int], limit: int = 10) -> str:
+    """Name ports as numeric ranges such as 22, 80, 443-445, listing at most `limit` ranges."""
+    ranges = []
+    for _, run in groupby(enumerate(sorted(ports)), key=lambda item: item[1] - item[0]):
+        numbers = [number for _, number in run]
+        ranges.append(str(numbers[0]) if len(numbers) == 1 else f"{numbers[0]}-{numbers[-1]}")
+    hidden = len(ranges) - limit
+    if hidden > 0:
+        return ", ".join(ranges[:limit]) + f", and {hidden} more range{'s' if hidden > 1 else ''}"
+    return ", ".join(ranges)
+
+
 def read_snapshot(path: Path) -> Snapshot:
     """Read the stronger metadata needed for a conservative comparison."""
     return _snapshot_from_root(_read_root(path), path)
@@ -152,7 +198,7 @@ def parse_snapshot(data: bytes, source: Path) -> Snapshot:
 
 
 def _snapshot_from_root(root: Element, source: Path) -> Snapshot:
-    inventory = _inventory_from_xml(root)
+    inventory, port_reasons, host_status = _records_from_xml(root)
     scans = root.findall("scaninfo")
     if len(scans) != 1 or scans[0].get("type") not in {"connect", "syn"}:
         raise ValueError("Comparison supports exactly one TCP connect or SYN scan per snapshot.")
@@ -167,13 +213,32 @@ def _snapshot_from_root(root: Element, source: Path) -> Snapshot:
         )
     coverage = _port_coverage(scans[0].get("services", ""))
     count = scans[0].get("numservices", "")
-    if not re.fullmatch(r"[0-9]{1,5}", count) or int(count) != len(coverage):
-        raise ValueError("Declared TCP port count does not match the port coverage.")
-    for ports in inventory.values():
-        if not set(ports).issubset(coverage):
-            raise ValueError("Explicit port observations fall outside the declared TCP coverage.")
+    if not re.fullmatch(r"[0-9]{1,5}", count):
+        raise ValueError(
+            "Declared TCP port count is missing or invalid. Check the scaninfo numservices value."
+        )
+    if int(count) != len(coverage):
+        raise ValueError(
+            f"Declared TCP port count ({int(count)}) does not match the port coverage "
+            f"({len(coverage)} ports)."
+        )
+    for address, ports in inventory.items():
+        outside = ports.keys() - coverage
+        if outside:
+            raise ValueError(
+                f"Explicit observations for {address} fall outside the declared TCP coverage: "
+                f"{_port_ranges(outside)}."
+            )
     return Snapshot(
-        source, started, finished, scans[0].attrib["type"], version, coverage, inventory
+        source,
+        started,
+        finished,
+        scans[0].attrib["type"],
+        version,
+        coverage,
+        inventory,
+        port_reasons,
+        host_status,
     )
 
 
@@ -186,22 +251,43 @@ def compare_snapshots(
             "Confirm the same scan location, intended targets, and other scan settings."
         )
     if before.method != after.method:
-        raise ValueError("Scan methods differ. Compare snapshots from the same scan method.")
-    if before.version != after.version:
-        raise ValueError("Nmap versions differ. Compare snapshots from the same Nmap version.")
-    if before.coverage != after.coverage:
         raise ValueError(
-            "TCP port coverage differs. Compare snapshots with identical port coverage."
+            f"Scan methods differ: earlier {before.method}, later {after.method}. "
+            "Compare snapshots from the same scan method."
+        )
+    if before.version != after.version:
+        raise ValueError(
+            f"Nmap versions differ: earlier {before.version}, later {after.version}. "
+            "Compare snapshots from the same Nmap version."
+        )
+    if before.coverage != after.coverage:
+        only = (
+            f"only the {label} scan covers {_port_ranges(ports)}"
+            for label, ports in (
+                ("earlier", before.coverage - after.coverage),
+                ("later", after.coverage - before.coverage),
+            )
+            if ports
+        )
+        raise ValueError(
+            f"TCP port coverage differs: {'; '.join(only)}. "
+            "Compare snapshots with identical port coverage."
         )
     if after.started < before.started:
-        raise ValueError("Snapshots are reversed. Supply the earlier scan first.")
+        raise ValueError(
+            f"Snapshots are reversed: the first file starts {before.started.isoformat()} "
+            f"and the second starts {after.started.isoformat()}. Supply the earlier scan first."
+        )
     repeat_observations = (
         before.started == after.started
         and before.finished == after.finished
         and before.inventory == after.inventory
     )
     if after.started < before.finished and not repeat_observations:
-        raise ValueError("Scan windows overlap. Use non-overlapping earlier and later scans.")
+        raise ValueError(
+            f"Scan windows overlap: earlier {_window(before)}, later {_window(after)}. "
+            "Use non-overlapping earlier and later scans."
+        )
 
     changes = []
     for address in sorted(before.inventory.keys() | after.inventory.keys(), key=IPv4Address):
@@ -242,13 +328,77 @@ def compare_report(
     return render_markdown(before, after, changes)
 
 
+def _window(snapshot: Snapshot) -> str:
+    return f"{snapshot.started.isoformat()} -> {snapshot.finished.isoformat()}"
+
+
+def _with_reason(value: str, reason: str | None) -> str:
+    return f"{value} ({reason or 'no reason recorded'})"
+
+
+def _status_text(host_status: HostStatus, address: str) -> str:
+    return _with_reason(*host_status[address]) if address in host_status else "not recorded"
+
+
+def _evidence_text(snapshot: Snapshot, change: Change, value: str | None) -> str:
+    """Describe one side of a difference. Absence stays not observed, never closed."""
+    if value is None:
+        return "not observed"
+    if change.port is None:
+        return value
+    return _with_reason(value, snapshot.port_reasons.get(change.address, {}).get(change.port))
+
+
+def _host_text(snapshot: Snapshot, address: str) -> str:
+    if address not in snapshot.inventory:
+        return "not observed"
+    return _status_text(snapshot.host_status, address)
+
+
+def _format_inspection(root: Element, source: Path) -> str:
+    inventory, port_reasons, host_status = _records_from_xml(root)
+    lines = ["IPv4/TCP observations (not a security verdict)"]
+    if not inventory:
+        lines.append("No IPv4 host observations.")
+    for address in sorted(inventory, key=IPv4Address):
+        lines.append(f"{address}  host status: {_status_text(host_status, address)}")
+        ports, reasons = inventory[address], port_reasons[address]
+        if not ports:
+            lines.append("  No explicit TCP port observations.")
+        for number, state in sorted(ports.items()):
+            lines.append(f"  {number}/tcp  {_with_reason(state, reasons.get(number))}")
+    lines.extend(
+        [
+            "Only explicit port observations are listed; missing ports are not classified.",
+            "Host status and reasons are shown as Nmap recorded them, not as verdicts.",
+            "Comparison pre-flight (this file only):",
+        ]
+    )
+    # The records above already passed, so any failure here is comparison metadata.
+    try:
+        snapshot = _snapshot_from_root(root, source)
+    except ValueError as exc:
+        lines.append(f"  Ready to compare: no. {exc}")
+    else:
+        lines.extend(
+            [
+                f"  UTC window: {_window(snapshot)}",
+                f"  Scan: TCP {snapshot.method}; Nmap {snapshot.version}; "
+                f"{len(snapshot.coverage)} declared ports: {_port_ranges(snapshot.coverage)}",
+                "  Ready to compare: yes. compare also checks the other file and requires "
+                "--confirm-same-context.",
+            ]
+        )
+    return "\n".join(lines)
+
+
 def _format_comparison(before: Snapshot, after: Snapshot, changes: list[Change]) -> str:
     lines = [
         "Snapshot comparison (not a security verdict)",
         f"Earlier: {str(before.source)!a}",
-        f"  UTC window: {before.started.isoformat()} -> {before.finished.isoformat()}",
+        f"  UTC window: {_window(before)}",
         f"Later: {str(after.source)!a}",
-        f"  UTC window: {after.started.isoformat()} -> {after.finished.isoformat()}",
+        f"  UTC window: {_window(after)}",
         f"Scan: TCP {before.method}; Nmap {before.version}; {len(before.coverage)} declared ports",
         "Context: same location, intended targets, and other settings confirmed by user.",
         f"Observation differences: {len(changes)}",
@@ -267,13 +417,18 @@ def _format_comparison(before: Snapshot, after: Snapshot, changes: list[Change])
                 else "PORT OBSERVATION"
             )
         lines.append(
-            f"{label} {target}: {change.before or 'not observed'} -> "
-            f"{change.after or 'not observed'}"
+            f"{label} {target}: {_evidence_text(before, change, change.before)} -> "
+            f"{_evidence_text(after, change, change.after)}"
+        )
+        lines.append(
+            f"  Host status: {_host_text(before, change.address)} -> "
+            f"{_host_text(after, change.address)}"
         )
     lines.extend(
         [
             "Missing and grouped port records are not classified as closed.",
             "IP addresses are not device identities; port numbers are not application identities.",
+            "Host status and reasons show how Nmap classified records, not why anything changed.",
             "Context is user-confirmed, not independently verified by Watchpost.",
         ]
     )
@@ -315,21 +470,11 @@ def main(argv: list[str] | None = None) -> int:
                 write_report(args.output, render_markdown(before, after, changes))
                 print(f"Report saved to {str(args.output)!a}")
             return 0
-        inventory = read_inventory(args.snapshot)
+        inspection = _format_inspection(_read_root(args.snapshot), args.snapshot)
     except (OSError, ValueError) as exc:
         parser.exit(2, f"watchpost: error: {exc}\n")
 
-    print("IPv4/TCP observations (not a security verdict)")
-    if not inventory:
-        print("No IPv4 host observations.")
-    for address in sorted(inventory, key=IPv4Address):
-        print(address)
-        ports = inventory[address]
-        if not ports:
-            print("  No explicit TCP port observations.")
-        for number, state in sorted(ports.items()):
-            print(f"  {number}/tcp  {state}")
-    print("Only explicit port observations are listed; missing ports are not classified.")
+    print(inspection)
     return 0
 
 

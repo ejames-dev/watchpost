@@ -11,13 +11,35 @@ if TYPE_CHECKING:
     from watchpost import Change, Snapshot
 
 
+def _with_reason(value: str, reason: str | None) -> str:
+    return f"`{value}`, " + (f"reason `{reason}`" if reason else "no reason recorded")
+
+
+def _evidence(snapshot: Snapshot, change: Change, value: str | None) -> str:
+    """Quote one side of a difference. Absence stays `not observed`, never closed."""
+    if value is None:
+        return "`not observed`"
+    if change.port is None:
+        return f"`{value}`"
+    return _with_reason(value, snapshot.port_reasons.get(change.address, {}).get(change.port))
+
+
+def _host_status(snapshot: Snapshot, address: str) -> str:
+    if address not in snapshot.inventory:
+        return "`not observed`"
+    if address not in snapshot.host_status:
+        return "status not recorded"
+    return _with_reason(*snapshot.host_status[address])
+
+
 def _finding_text(change: Change) -> tuple[str, str, str]:
     """Return a category, explanation, and suggested human check."""
     if change.port is None:
         return (
             "Address newly observed" if change.before is None else "Address not observed later",
             "This address has a record in only one snapshot. This does not prove a device "
-            "was added or removed, or that the same device held this address in both scans.",
+            "was added or removed, or that the same device held this address in both scans. "
+            "A record alone does not show that the host responded; see its host status.",
             "Confirm target scope, address assignments, host availability, and scan reachability.",
         )
     if change.before is None:
@@ -33,7 +55,7 @@ def _finding_text(change: Change) -> tuple[str, str, str]:
             "Port not observed later",
             "There is no later explicit port record. Absence is not a confirmed closure, "
             "even if the later XML contains grouped closed-port counts.",
-            "Check host availability, grouped records, and scan conditions before "
+            "Check the host status, grouped records, and scan conditions before "
             "concluding that the port closed.",
         )
     if change.after == "open":
@@ -103,8 +125,11 @@ def render_markdown(before: Snapshot, after: Snapshot, changes: list[Change]) ->
                 f"### {number}. {category}",
                 "",
                 f"- **Record:** {record}",
-                f"- **Earlier evidence:** `{change.before or 'not observed'}` — Earlier snapshot",
-                f"- **Later evidence:** `{change.after or 'not observed'}` — Later snapshot",
+                f"- **Earlier evidence:** {_evidence(before, change, change.before)} "
+                "— Earlier snapshot",
+                f"- **Later evidence:** {_evidence(after, change, change.after)} — Later snapshot",
+                f"- **Host status:** Earlier {_host_status(before, change.address)}; "
+                f"Later {_host_status(after, change.address)}",
                 "",
                 f"**Explanation:** {explanation}",
                 "",
@@ -144,10 +169,12 @@ def render_markdown(before: Snapshot, after: Snapshot, changes: list[Change]) ->
         "## Findings",
         "",
         "Source names below refer to the Earlier and Later snapshot sections above. "
-        "Port evidence is the explicit XML state for the listed IPv4 address and numeric TCP "
-        "port ID. Address evidence records presence only, not host status or device identity.",
+        "Port evidence is the explicit XML state, with the reason Nmap recorded, for the listed "
+        "IPv4 address and numeric TCP port ID. Address evidence records presence only, not "
+        "device identity. Host status repeats what Nmap recorded about the host in each snapshot.",
         "",
-        "`not observed` means no explicit record in the parsed inventory; it is not an Nmap state.",
+        "`not observed` means no explicit record in the parsed inventory; it is not an Nmap state. "
+        "Reasons and host status show how Nmap classified a record, not why anything changed.",
         "",
         *(
             findings
@@ -161,7 +188,9 @@ def render_markdown(before: Snapshot, after: Snapshot, changes: list[Change]) ->
         "- Missing and grouped port records are not classified as closed.",
         "- IP addresses are not device identities; port numbers are not application identities.",
         "- Filtered and uncertain states are preserved, not treated as confirmed open or closed.",
-        "- Host status, hostnames, service names, scripts, and grouped states are not compared.",
+        "- Host status and reasons are shown as recorded evidence. They are not compared or used "
+        "to reclassify any record.",
+        "- Hostnames, service names, scripts, and grouped states are not compared.",
         "- These are scan-window observations, not proof of when or why a change happened.",
         "- User confirmation is not independently verified by Watchpost.",
         "- Keep the original XML files with this report; "

@@ -21,8 +21,12 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 class ReportTests(unittest.TestCase):
     def report_for(self, old_inventory, new_inventory):
-        before = replace(read_snapshot(EXAMPLES / "baseline.xml"), inventory=old_inventory)
-        after = replace(read_snapshot(EXAMPLES / "after.xml"), inventory=new_inventory)
+        # Replaced inventories carry no recorded reasons or host status.
+        evidence = {"port_reasons": {}, "host_status": {}}
+        before = replace(
+            read_snapshot(EXAMPLES / "baseline.xml"), inventory=old_inventory, **evidence
+        )
+        after = replace(read_snapshot(EXAMPLES / "after.xml"), inventory=new_inventory, **evidence)
         changes = compare_snapshots(before, after, same_context_confirmed=True)
         return render_markdown(before, after, changes)
 
@@ -46,8 +50,9 @@ class ReportTests(unittest.TestCase):
             "| Port state changed | 1 |",
             "| Port not observed later | 0 |",
             "IPv4 `192.0.2.10`, TCP port `3000` (numeric ID)",
-            "**Earlier evidence:** `closed` — Earlier snapshot",
-            "**Later evidence:** `open` — Later snapshot",
+            "**Earlier evidence:** `closed`, reason `conn-refused` — Earlier snapshot",
+            "**Later evidence:** `open`, reason `syn-ack` — Later snapshot",
+            "**Host status:** Earlier `up`, reason `user-set`; Later `up`, reason `user-set`",
             "**Explanation:**",
             "**Suggested check:**",
             "**Investigation notes:**\n\n**Conclusion:**\n",
@@ -74,6 +79,36 @@ class ReportTests(unittest.TestCase):
                 self.assertIn(explanation, report)
                 self.assertNotIn("**Earlier evidence:** `closed`", report)
                 self.assertNotIn("**Later evidence:** `closed`", report)
+
+    def test_reasons_and_host_status_are_quoted_without_reclassifying(self):
+        before = read_snapshot(EXAMPLES / "baseline.xml")
+        after = read_snapshot(EXAMPLES / "after.xml")
+        after = replace(
+            after,
+            inventory={**after.inventory, "192.0.2.20": {}, "192.0.2.30": {}},
+            port_reasons={"192.0.2.10": {22: "syn-ack"}, "192.0.2.20": {}, "192.0.2.30": {}},
+            host_status={"192.0.2.10": ("up", None), "192.0.2.20": ("down", "no-response")},
+        )
+        report = render_markdown(
+            before, after, compare_snapshots(before, after, same_context_confirmed=True)
+        )
+        for expected in (
+            "| Port state changed | 1 |",
+            "| Port not observed later | 1 |",
+            "| Address newly observed | 1 |",
+            "**Earlier evidence:** `closed`, reason `conn-refused` — Earlier snapshot",
+            "**Later evidence:** `open`, no reason recorded — Later snapshot",
+            "**Host status:** Earlier `up`, reason `user-set`; Later `up`, no reason recorded",
+            "**Later evidence:** `not observed` — Later snapshot",
+            "**Host status:** Earlier `up`, reason `user-set`; Later `down`, reason `no-response`",
+            "**Later evidence:** `observed` — Later snapshot",
+            "**Host status:** Earlier `not observed`; Later status not recorded",
+            "see its host status",
+            "not why anything changed",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, report)
+        self.assertNotIn("**Later evidence:** `closed`", report)
 
     def test_address_and_port_counts_are_separate_observations(self):
         report = self.report_for({"192.0.2.100": {22: "open"}}, {"192.0.2.3": {80: "open"}})

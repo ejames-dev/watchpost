@@ -25,7 +25,7 @@ Offline, synthetic data, writes reports to a temp directory only.
 | Time | Step | Point |
 |---|---|---|
 | 0:30 | Problem | "New port" is not "new service". "Missing" is not "closed". |
-| 1:00 | Inspect, then compare `baseline` vs `after` | `closed -> open` on 3000/tcp; report has fixed-rule explanations and blank investigation fields |
+| 1:00 | Inspect, then compare `baseline` vs `after` | `closed (conn-refused) -> open (syn-ack)` on 3000/tcp; report has fixed-rule explanations and blank investigation fields |
 | 0:45 | Same evidence, different policy | Interpretation comes from the human, not the tool |
 | 1:00 | Compare against `incomplete.xml` | Exit code 2, no report: refusal over over-claiming |
 | 1:00 | How it was built | Guardrails, PR history, tests |
