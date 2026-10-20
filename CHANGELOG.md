@@ -7,6 +7,17 @@
 - `compare_report` and `parse_snapshot` validate and compare snapshots held in memory.
 - Static browser build in `web/` using self-hosted Pyodide, with a same-origin-only
   content security policy and a Node smoke test. See [the browser build guide](docs/web.md).
+- `inspect`, `compare`, and reports show each host's recorded status and the reason Nmap
+  recorded for each port state. They are evidence only and never change findings or counts.
+- `inspect` ends with a comparison pre-flight: the scan metadata that `compare` checks, and
+  whether the file passes the checks that need only one snapshot.
+- Refused comparisons name the differing scan methods, Nmap versions, port coverage (as ranges),
+  scan windows, declared port counts, and ports outside the declared coverage.
+
+### Changed
+
+- Malformed host status or reason values are rejected like other malformed records.
+- `examples/report.md` is regenerated with the new evidence lines.
 
 ## 0.0.1
 

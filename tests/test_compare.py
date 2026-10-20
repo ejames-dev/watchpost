@@ -1,6 +1,7 @@
 """Comparison tests use synthetic documentation addresses, never live scans."""
 
 import io
+import re
 import subprocess
 import sys
 import tempfile
@@ -43,6 +44,35 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot.coverage, frozenset({22, 80, 443, 3000}))
         self.assertEqual(snapshot.inventory["192.0.2.10"][3000], "closed")
         self.assertEqual(snapshot.inventory["192.0.2.20"], {22: "open"})
+
+    def test_reads_host_status_and_reasons_without_changing_comparisons(self):
+        before = read_snapshot(EXAMPLE)
+        self.assertEqual(
+            before.host_status,
+            {"192.0.2.10": ("up", "user-set"), "192.0.2.20": ("up", "user-set")},
+        )
+        self.assertEqual(
+            before.port_reasons,
+            {
+                "192.0.2.10": {
+                    22: "syn-ack",
+                    80: "conn-refused",
+                    443: "syn-ack",
+                    3000: "conn-refused",
+                },
+                "192.0.2.20": {22: "syn-ack"},
+            },
+        )
+        relabeled = self.later_xml.replace('reason="conn-refused"', 'reason="reset"').replace(
+            'reason="user-set"', 'reason="echo-reply"'
+        )
+        bare = re.sub(r"<status [^>]*/>", "", re.sub(r' reason="[^"]*"', "", self.later_xml))
+        for xml in (relabeled, bare):
+            with self.subTest(xml=xml):
+                later = self.snapshot(xml)
+                self.assertEqual(compare_snapshots(before, later, same_context_confirmed=True), [])
+        self.assertEqual(later.host_status, {})
+        self.assertEqual(later.port_reasons, {"192.0.2.10": {}, "192.0.2.20": {}})
 
     def test_compares_an_explicit_state_change(self):
         later = self.snapshot(
@@ -185,6 +215,90 @@ class SnapshotTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "overlap"):
             compare_snapshots(before, self.snapshot(conflicting), same_context_confirmed=True)
 
+    def test_refusals_name_the_values_that_differ(self):
+        def coverage(xml, services, count):
+            return xml.replace('services="22,80,443,3000"', f'services="{services}"').replace(
+                'numservices="4"', f'numservices="{count}"'
+            )
+
+        isolated = ",".join(str(port) for port in range(5000, 5024, 2))
+        base = EXAMPLE.read_text()
+        overlapping = base.replace('time="1767225601" elapsed', 'time="1767225602" elapsed')
+        cases = (
+            (
+                base,
+                self.later_xml.replace('type="connect"', 'type="syn"'),
+                "Scan methods differ: earlier connect, later syn.",
+            ),
+            (
+                base,
+                self.later_xml.replace('version="7.95"', 'version="7.96"'),
+                "Nmap versions differ: earlier 7.95, later 7.96.",
+            ),
+            (
+                base,
+                coverage(self.later_xml, "22,80,443,3000-3001", 5),
+                "TCP port coverage differs: only the later scan covers 3001.",
+            ),
+            (
+                coverage(base, "22,80,443,3000,9000", 5),
+                coverage(self.later_xml, "22,80,443,3000,8080-8081", 6),
+                "only the earlier scan covers 9000; only the later scan covers 8080-8081.",
+            ),
+            (
+                base,
+                coverage(self.later_xml, f"22,80,443,3000,{isolated}", 16),
+                "only the later scan covers 5000, 5002, 5004, 5006, 5008, 5010, 5012, 5014, "
+                "5016, 5018, and 2 more ranges.",
+            ),
+            (
+                self.later_xml,
+                base,
+                "Snapshots are reversed: the first file starts 2026-01-01T00:01:00+00:00 "
+                "and the second starts 2026-01-01T00:00:00+00:00.",
+            ),
+            (
+                base,
+                overlapping,
+                "Scan windows overlap: earlier 2026-01-01T00:00:00+00:00 -> "
+                "2026-01-01T00:00:01+00:00, later 2026-01-01T00:00:00+00:00 -> "
+                "2026-01-01T00:00:02+00:00.",
+            ),
+        )
+        for before_xml, after_xml, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaises(ValueError) as error:
+                    compare_snapshots(
+                        self.snapshot(before_xml, "before.xml"),
+                        self.snapshot(after_xml),
+                        same_context_confirmed=True,
+                    )
+                self.assertIn(message, str(error.exception))
+
+    def test_metadata_refusals_name_counts_and_ports(self):
+        cases = (
+            (
+                self.later_xml.replace('numservices="4"', 'numservices="5"'),
+                "Declared TCP port count (5) does not match the port coverage (4 ports).",
+            ),
+            (
+                self.later_xml.replace('numservices="4"', 'numservices="four"'),
+                "Declared TCP port count is missing or invalid.",
+            ),
+            (
+                self.later_xml.replace('services="22,80,443,3000"', 'services="80,443"').replace(
+                    'numservices="4"', 'numservices="2"'
+                ),
+                "Explicit observations for 192.0.2.10 fall outside the declared TCP coverage: "
+                "22, 3000.",
+            ),
+        )
+        for xml, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaises(ValueError) as error:
+                    self.snapshot(xml)
+                self.assertIn(message, str(error.exception))
+
     def test_identical_and_later_unchanged_observations_have_no_changes(self):
         before = read_snapshot(EXAMPLE)
         for xml in (
@@ -277,7 +391,12 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("2026-01-01T00:00:00+00:00", result.stdout)
         self.assertIn("2026-01-01T00:01:01+00:00", result.stdout)
         self.assertIn("confirmed by user", result.stdout)
-        self.assertIn("STATE CHANGE 192.0.2.10 3000/tcp: closed -> open", result.stdout)
+        self.assertIn(
+            "STATE CHANGE 192.0.2.10 3000/tcp: closed (conn-refused) -> open (syn-ack)\n"
+            "  Host status: up (user-set) -> up (user-set)\n",
+            result.stdout,
+        )
+        self.assertIn("not why anything changed", result.stdout)
         self.assertIn("not a security verdict", result.stdout)
 
     def test_compare_command_requires_confirmation_before_reading_files(self):
@@ -336,10 +455,48 @@ class SnapshotTests(unittest.TestCase):
             self.assertEqual(
                 main(["compare", str(EXAMPLE), str(self.path), "--confirm-same-context"]), 0
             )
-        self.assertIn("ADDRESS OBSERVATION 192.0.2.20: observed -> not observed", output.getvalue())
-        self.assertIn("PORT OBSERVATION 192.0.2.20 22/tcp: open -> not observed", output.getvalue())
-        self.assertIn("ADDRESS OBSERVATION 192.0.2.30: not observed -> observed", output.getvalue())
+        for expected in (
+            "ADDRESS OBSERVATION 192.0.2.20: observed -> not observed\n"
+            "  Host status: up (user-set) -> not observed\n",
+            "PORT OBSERVATION 192.0.2.20 22/tcp: open (syn-ack) -> not observed\n",
+            "ADDRESS OBSERVATION 192.0.2.30: not observed -> observed\n"
+            "  Host status: not observed -> up (user-set)\n",
+        ):
+            with self.subTest(expected=expected):
+                self.assertIn(expected, output.getvalue())
         self.assertNotIn("STATE CHANGE", output.getvalue())
+
+    def test_down_host_ports_stay_not_observed(self):
+        root = ElementTree.fromstring(self.later_xml)
+        host = root.findall("host")[1]
+        host.remove(host.find("ports"))
+        host.find("status").set("state", "down")
+        host.find("status").set("reason", "no-response")
+        root.append(
+            ElementTree.fromstring(
+                '<host><status state="down" reason="no-response"/>'
+                '<address addr="192.0.2.30" addrtype="ipv4"/></host>'
+            )
+        )
+        later = self.snapshot(ElementTree.tostring(root, encoding="unicode"))
+        self.assertEqual(
+            compare_snapshots(read_snapshot(EXAMPLE), later, same_context_confirmed=True),
+            [Change("192.0.2.20", 22, "open", None), Change("192.0.2.30", None, None, "observed")],
+        )
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(
+                main(["compare", str(EXAMPLE), str(self.path), "--confirm-same-context"]), 0
+            )
+        findings = output.getvalue().split("Observation differences: 2\n")[1]
+        findings = findings.split("Missing and grouped")[0]
+        self.assertEqual(
+            findings,
+            "PORT OBSERVATION 192.0.2.20 22/tcp: open (syn-ack) -> not observed\n"
+            "  Host status: up (user-set) -> down (no-response)\n"
+            "ADDRESS OBSERVATION 192.0.2.30: not observed -> observed\n"
+            "  Host status: not observed -> down (no-response)\n",
+        )
 
     def test_changes_sort_addresses_and_ports_numerically(self):
         before_xml = EXAMPLE.read_text().replace("192.0.2.10", "192.0.2.100")

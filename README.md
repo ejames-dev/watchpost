@@ -66,18 +66,28 @@ uv run --offline watchpost inspect examples/baseline.xml
 
 ```text
 IPv4/TCP observations (not a security verdict)
-192.0.2.10
-  22/tcp  open
-  80/tcp  closed
-  443/tcp  open
-  3000/tcp  closed
-192.0.2.20
-  22/tcp  open
+192.0.2.10  host status: up (user-set)
+  22/tcp  open (syn-ack)
+  80/tcp  closed (conn-refused)
+  443/tcp  open (syn-ack)
+  3000/tcp  closed (conn-refused)
+192.0.2.20  host status: up (user-set)
+  22/tcp  open (syn-ack)
 Only explicit port observations are listed; missing ports are not classified.
+Host status and reasons are shown as Nmap recorded them, not as verdicts.
+Comparison pre-flight (this file only):
+  UTC window: 2026-01-01T00:00:00+00:00 -> 2026-01-01T00:00:01+00:00
+  Scan: TCP connect; Nmap 7.95; 4 declared ports: 22, 80, 443, 3000
+  Ready to compare: yes. compare also checks the other file and requires --confirm-same-context.
 ```
 
 Nmap is not required. These addresses and states are fictional.
 For an existing checkout, run the final two commands from its root directory.
+
+Each address shows the host status Nmap recorded, and each port shows Nmap's recorded reason.
+The pre-flight runs the comparison checks that need only this file, so you can catch an
+unsuitable snapshot before comparing. A failed pre-flight prints `Ready to compare: no` with
+the reason; `inspect` still lists the records and exits 0.
 
 ## Compare two snapshots
 
@@ -89,12 +99,13 @@ uv run --offline watchpost compare examples/baseline.xml examples/after.xml \
 The synthetic second scan is one minute later. Its only explicit state change is:
 
 ```text
-STATE CHANGE 192.0.2.10 3000/tcp: closed -> open
+STATE CHANGE 192.0.2.10 3000/tcp: closed (conn-refused) -> open (syn-ack)
+  Host status: up (user-set) -> up (user-set)
 ```
 
 The output includes both source paths, UTC scan windows, Nmap version, scan method,
-declared port count, differences, and limitations. Without `--output`, the command prints
-only to the terminal.
+declared port count, differences with Nmap's recorded reasons and host status, and limitations.
+Without `--output`, the command prints only to the terminal.
 
 **Before using real inputs, confirm the same scan location, intended targets, and remaining
 Nmap settings.** The flag records your confirmation. It does not let Watchpost verify the
@@ -110,13 +121,20 @@ Comparison currently requires:
 - Earlier and later scan windows that do not overlap. Equal windows with identical supported
   observations are allowed, so comparing a snapshot with itself produces no observed changes.
 
+When a requirement fails, the error names what differs, such as both Nmap versions, the ports
+that only one scan covers, or both scan windows.
+
 | Evidence | Output |
 |---|---|
-| Explicit states differ | `STATE CHANGE ... closed -> open` |
-| A port has no earlier explicit record | `PORT OBSERVATION ... not observed -> open` |
-| A port has no later explicit record | `PORT OBSERVATION ... open -> not observed` |
+| Explicit states differ | `STATE CHANGE ... closed (conn-refused) -> open (syn-ack)` |
+| A port has no earlier explicit record | `PORT OBSERVATION ... not observed -> open (syn-ack)` |
+| A port has no later explicit record | `PORT OBSERVATION ... open (syn-ack) -> not observed` |
 | An address appears in only one snapshot | `ADDRESS OBSERVATION`, not a device addition/removal claim |
 | Supported explicit observations match | `No observed changes in explicit IPv4/TCP records.` |
+
+Each difference is followed by a `Host status:` line, such as `up (user-set) -> down (no-response)`.
+Reasons and host status are copied from the XML as evidence. They never turn a missing record into
+a closure, and a change in them alone is not counted as a difference.
 
 A newly observed port is not proof that a service just started. A missing port is not proof of
 closure. Grouped records and uncertain states do not become guessed open/closed results.
@@ -139,7 +157,8 @@ Each report includes:
 
 - Source paths, UTC scan windows, scan metadata, and user-confirmed assumptions.
 - Separate counts for changed states, newly observed records, and records not observed later.
-- Each finding's address, numeric TCP port ID where applicable, and earlier/later source evidence.
+- Each finding's address, numeric TCP port ID where applicable, earlier/later source evidence with
+  Nmap's recorded reasons, and the host status recorded in each snapshot.
 - Fixed-rule explanations and suggested checks. No AI verdicts or vulnerability scores.
 - Evidence limitations and blank fields for investigation notes and conclusions.
 
@@ -174,20 +193,22 @@ The walkthroughs supply fictional context and clearly labeled example review not
 1. Read the selected local file and reject inputs larger than 10 MiB.
 2. Parse XML with entity expansion and external entities disabled.
 3. Check the Nmap root, completion marker, TCP scan metadata, and explicit IPv4/TCP records.
-4. Print addresses and ports in numerical order.
+4. Print addresses and ports in numerical order, with recorded host status and reasons.
+5. Run the comparison checks that need only this file, and print the result as a pre-flight.
 
 The command rejects malformed XML, unsupported encodings, failed scans, reported host timeouts,
-UDP/IPv6 data, invalid addresses or ports, and duplicate observations.
-Errors exit with code 2, without partial inventory output.
+UDP/IPv6 data, invalid addresses or ports, duplicate observations, and malformed host status or
+reason values. Errors exit with code 2, without partial inventory output.
 
 Only explicit `<port>` records are listed. This milestone does not expand grouped
 `<extraports>` records, even when additional metadata is present. Hostnames, service names,
-script output, and other free-text scan fields are not printed.
+script output, and other free-text scan fields are not printed. Host status and reasons are
+printed only as simple Nmap tokens, such as `up` or `syn-ack`.
 
-This is not full Nmap schema validation. `inspect` focuses on individual records;
-`compare` adds the stronger metadata checks described above. Host status, service names,
-script output, and grouped states are not compared. Matching metadata does not prove identical
-scan conditions, and no-change output is not a safety verdict.
+This is not full Nmap schema validation. The pre-flight covers single-file metadata; `compare`
+adds the checks that need both files and your confirmation. Host status is shown but not
+compared. Service names, script output, and grouped states are not compared. Matching metadata
+does not prove identical scan conditions, and no-change output is not a safety verdict.
 
 ## Development
 
@@ -232,3 +253,5 @@ Beyond the v0.1 brief:
 
 - [x] Run comparisons in the browser without uploading scans. The CLI still needs no account
   or cloud service; the hosted page needs only the static site that serves it.
+- [x] Show recorded host status and reasons as evidence, name the values behind refused
+  comparisons, and pre-flight single snapshots with `inspect`.

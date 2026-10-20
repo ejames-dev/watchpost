@@ -52,15 +52,16 @@ Address and port differences are counted separately, not as distinct incidents o
 
 ## Findings
 
-Source names below refer to the Earlier and Later snapshot sections above. Port evidence is the explicit XML state for the listed IPv4 address and numeric TCP port ID. Address evidence records presence only, not host status or device identity.
+Source names below refer to the Earlier and Later snapshot sections above. Port evidence is the explicit XML state, with the reason Nmap recorded, for the listed IPv4 address and numeric TCP port ID. Address evidence records presence only, not device identity. Host status repeats what Nmap recorded about the host in each snapshot.
 
-`not observed` means no explicit record in the parsed inventory; it is not an Nmap state.
+`not observed` means no explicit record in the parsed inventory; it is not an Nmap state. Reasons and host status show how Nmap classified a record, not why anything changed.
 
 ### 1. Port state changed
 
 - **Record:** IPv4 `192.0.2.10`, TCP port `3000` (numeric ID)
-- **Earlier evidence:** `closed` — Earlier snapshot
-- **Later evidence:** `open` — Later snapshot
+- **Earlier evidence:** `closed`, reason `conn-refused` — Earlier snapshot
+- **Later evidence:** `open`, reason `syn-ack` — Later snapshot
+- **Host status:** Earlier `up`, reason `user-set`; Later `up`, reason `user-set`
 
 **Explanation:** Both scans contain explicit states, and the later scan reports this port as open. This does not identify the application or prove Internet exposure or compromise.
 
@@ -75,7 +76,8 @@ Source names below refer to the Earlier and Later snapshot sections above. Port 
 - Missing and grouped port records are not classified as closed.
 - IP addresses are not device identities; port numbers are not application identities.
 - Filtered and uncertain states are preserved, not treated as confirmed open or closed.
-- Host status, hostnames, service names, scripts, and grouped states are not compared.
+- Host status and reasons are shown as recorded evidence. They are not compared or used to reclassify any record.
+- Hostnames, service names, scripts, and grouped states are not compared.
 - These are scan-window observations, not proof of when or why a change happened.
 - User confirmation is not independently verified by Watchpost.
 - Keep the original XML files with this report; references do not embed or authenticate them.
