@@ -57,6 +57,7 @@ class ParseTests(unittest.TestCase):
             "extra top-level key": (f'version = 1\n{key}state = "open"\n', "nothing else"),
             "bad key": ('[expect."host/tcp/22"]\nstate = "open"\n', "must look like"),
             "leading zero": ('[expect."192.0.2.010/tcp/22"]\nstate = "open"\n', "must look like"),
+            "leading-zero port": ('[expect."192.0.2.10/tcp/022"]\nstate = "open"\n', "must look"),
             "UDP key": ('[expect."192.0.2.10/udp/53"]\nstate = "open"\n', "must look like"),
             "port too large": ('[expect."192.0.2.10/tcp/65536"]\nstate = "open"\n', "must look"),
             "missing state": (f'{key}label = "SSH"\n', "needs a state"),

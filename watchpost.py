@@ -446,7 +446,8 @@ def parse_expectations(data: bytes, source: Path) -> Expectations:
 
 
 def _expectation(key: str, entry: object) -> Expectation:
-    match = re.fullmatch(r"([0-9]{1,3}(?:\.[0-9]{1,3}){3})/tcp/([0-9]{1,5})", key)
+    # Canonical address and port only, so every key equals the finding key it describes.
+    match = re.fullmatch(r"([0-9]{1,3}(?:\.[0-9]{1,3}){3})/tcp/(0|[1-9][0-9]{0,4})", key)
     try:
         valid = bool(match) and str(IPv4Address(match[1])) == match[1] and int(match[2]) < 65536
     except ValueError:
