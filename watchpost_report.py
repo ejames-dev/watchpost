@@ -1,7 +1,8 @@
-"""Deterministic Markdown for validated comparisons; no scanning or network access."""
+"""Deterministic Markdown and JSON for validated comparisons; no scanning or network access."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from pathlib import Path
@@ -9,18 +10,63 @@ from tempfile import NamedTemporaryFile
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from watchpost import Change, Snapshot
+    from watchpost import Change, Expectation, Expectations, Snapshot
 
 # Each label introduces an indented, escaped literal: text the user supplied, never markup.
 SOURCE_LABEL = "Source path (escaped literal):"
 NOTE_LABEL = "User's context note (escaped literal, not verified by Watchpost):"
+EXPECT_LABEL = "Expectations file (escaped literal):"
+EXPECT_HEADING = "## Your expectations"
 # Reviewers fill these in after generation, so verification skips their contents.
 REVIEW_FIELDS = ("**Investigation notes:**", "**Conclusion:**")
+
+NOTICE = "Observations, not a security verdict. Changes do not prove vulnerability or compromise."
+CATEGORIES = (
+    "Port state changed",
+    "Port newly observed",
+    "Port not observed later",
+    "Address newly observed",
+    "Address not observed later",
+)
+LIMITATIONS = (
+    "Missing and grouped port records are not classified as closed.",
+    "IP addresses are not device identities; port numbers are not application identities.",
+    "Filtered and uncertain states are preserved, not treated as confirmed open or closed.",
+    "Host status and reasons are shown as recorded evidence. They are not compared or used "
+    "to reclassify any record.",
+    "Grouped port counts are shown as host context. They are not compared or expanded into "
+    "per-port states.",
+    "Hostnames, service names, and scripts are not compared.",
+    "These are scan-window observations, not proof of when or why a change happened.",
+    "User confirmation is not independently verified by Watchpost.",
+    "Keep the original XML files with this report. The SHA-256 hashes identify them, and "
+    "`watchpost verify` rechecks the evidence. A hash does not prove who made a file, when, "
+    "or where.",
+    "Reports contain network details and are not anonymous. Review before sharing.",
+)
+EXPECT_NOTICE = (
+    "Expectations are your own statements about the later snapshot. Watchpost compares them "
+    "with explicit later records only. A match is not a safety verdict, and a difference is "
+    "not proof of a problem."
+)
+EXPECT_LIMITATION = (
+    "Expectations and their labels are your own statements. Watchpost cannot verify them."
+)
 
 
 def finding_key(change: Change) -> str:
     """Name a finding by its evidence, so notes can refer to it across reports."""
     return change.address if change.port is None else f"{change.address}/tcp/{change.port}"
+
+
+def expectation_result(expectation: Expectation, after: Snapshot) -> str:
+    """Compare an expectation with the later explicit record. Absence never matches."""
+    state = after.inventory.get(expectation.address, {}).get(expectation.port)
+    if state is not None:
+        return "matches" if state in expectation.states else "differs"
+    if expectation.port not in after.coverage:
+        return "cannot be checked: the later scan did not cover this port"
+    return "cannot be checked: no explicit later record"
 
 
 def _with_reason(value: str, reason: str | None) -> str:
@@ -121,25 +167,59 @@ def _source_section(label: str, snapshot: Snapshot) -> list[str]:
     ]
 
 
+def _expected(expectation: Expectation) -> str:
+    return " or ".join(f"`{state}`" for state in expectation.states)
+
+
+def expectation_tally(expectations: Expectations, after: Snapshot) -> dict[str, int]:
+    tally = {"matches": 0, "differs": 0, "cannot be checked": 0}
+    for item in expectations.entries:
+        tally[expectation_result(item, after).split(":")[0]] += 1
+    return tally
+
+
+def _expectations_section(expectations: Expectations, after: Snapshot) -> list[str]:
+    rows = []
+    for item in expectations.entries:
+        state = after.inventory.get(item.address, {}).get(item.port)
+        reason = after.port_reasons.get(item.address, {}).get(item.port)
+        later = "`not observed`" if state is None else _with_reason(state, reason)
+        label = f"`{item.label}`" if item.label else "none"
+        result = expectation_result(item, after).capitalize()
+        rows.append(f"| `{item.key}` | {_expected(item)} | {later} | {result} | {label} |")
+    tally = expectation_tally(expectations, after)
+    return [
+        EXPECT_HEADING,
+        "",
+        EXPECT_LABEL,
+        "",
+        f"    {str(expectations.source)!a}",
+        "",
+        f"- SHA-256: `{expectations.sha256}`",
+        f"- Results: matches {tally['matches']}; differs {tally['differs']}; "
+        f"cannot be checked {tally['cannot be checked']}",
+        "",
+        EXPECT_NOTICE,
+        "",
+        "| Key | Expected later state | Later evidence | Result | Your label |",
+        "|---|---|---|---|---|",
+        *rows,
+        "",
+    ]
+
+
 def render_markdown(
     before: Snapshot,
     after: Snapshot,
     changes: list[Change],
     *,
     context_note: str | None = None,
+    expectations: Expectations | None = None,
 ) -> str:
     """Render read_snapshot/compare_snapshots results after the comparison gate passes."""
     note = [] if context_note is None else [NOTE_LABEL, "", f"    {context_note!a}", ""]
-    counts = dict.fromkeys(
-        (
-            "Port state changed",
-            "Port newly observed",
-            "Port not observed later",
-            "Address newly observed",
-            "Address not observed later",
-        ),
-        0,
-    )
+    expected_by_key = {item.key: item for item in expectations.entries} if expectations else {}
+    counts = dict.fromkeys(CATEGORIES, 0)
     findings = []
     for number, change in enumerate(changes, 1):
         category, explanation, check = _finding_text(change)
@@ -162,6 +242,13 @@ def render_markdown(
                 f"Later {_grouped(after, change.address)}. Watchpost does not expand grouped "
                 "counts, so they are not evidence for this port."
             )
+        expected = expected_by_key.get(finding_key(change))
+        if expected is not None:
+            label = f" Your label: `{expected.label}`." if expected.label else ""
+            evidence.append(
+                f"- **Your expectation:** {_expected(expected)} — "
+                f"{expectation_result(expected, after)}.{label}"
+            )
         findings.extend(
             [
                 f"### {number}. {category}",
@@ -179,10 +266,11 @@ def render_markdown(
             ]
         )
 
+    limitations = LIMITATIONS + ((EXPECT_LIMITATION,) if expectations else ())
     lines = [
         "# Watchpost change review",
         "",
-        "> Observations, not a security verdict. Changes do not prove vulnerability or compromise.",
+        f"> {NOTICE}",
         "",
         "## Comparison context",
         "",
@@ -204,6 +292,7 @@ def render_markdown(
         "Address and port differences are counted separately, "
         "not as distinct incidents or devices.",
         "",
+        *(_expectations_section(expectations, after) if expectations else []),
         "## Findings",
         "",
         "Source names below refer to the Earlier and Later snapshot sections above. "
@@ -223,20 +312,7 @@ def render_markdown(
         ),
         "## Limitations",
         "",
-        "- Missing and grouped port records are not classified as closed.",
-        "- IP addresses are not device identities; port numbers are not application identities.",
-        "- Filtered and uncertain states are preserved, not treated as confirmed open or closed.",
-        "- Host status and reasons are shown as recorded evidence. They are not compared or used "
-        "to reclassify any record.",
-        "- Grouped port counts are shown as host context. They are not compared or expanded into "
-        "per-port states.",
-        "- Hostnames, service names, and scripts are not compared.",
-        "- These are scan-window observations, not proof of when or why a change happened.",
-        "- User confirmation is not independently verified by Watchpost.",
-        "- Keep the original XML files with this report. The SHA-256 hashes identify them, and "
-        "`watchpost verify` rechecks the evidence. A hash does not prove who made a file, when, "
-        "or where.",
-        "- Reports contain network details and are not anonymous. Review before sharing.",
+        *(f"- {line}" for line in limitations),
         "",
         "## Human review",
         "",
@@ -250,6 +326,104 @@ def render_markdown(
         "",
     ]
     return "\n".join(lines)
+
+
+def _snapshot_json(snapshot: Snapshot) -> dict[str, object]:
+    return {
+        "source": str(snapshot.source),
+        "sha256": snapshot.sha256,
+        "utc_start": snapshot.started.isoformat(),
+        "utc_finish": snapshot.finished.isoformat(),
+        "nmap_version": snapshot.version,
+        "scan_method": snapshot.method,
+        "declared_tcp_ports": len(snapshot.coverage),
+        "ipv4_address_records": len(snapshot.inventory),
+        "explicit_tcp_port_records": sum(len(ports) for ports in snapshot.inventory.values()),
+    }
+
+
+def _side_json(snapshot: Snapshot, change: Change, value: str | None) -> dict[str, object]:
+    observed = change.address in snapshot.inventory
+    status, status_reason = snapshot.host_status.get(change.address, ("not recorded", None))
+    reason = None
+    if value is not None and change.port is not None:
+        reason = snapshot.port_reasons.get(change.address, {}).get(change.port)
+    grouped = sorted(snapshot.grouped_ports.get(change.address, {}).items())
+    return {
+        "record": value or "not observed",
+        "reason": reason,
+        "host_status": status if observed else "not observed",
+        "host_status_reason": status_reason if observed else None,
+        "grouped_counts": dict(grouped) if observed else None,
+    }
+
+
+def _expectations_json(expectations: Expectations, after: Snapshot) -> dict[str, object]:
+    entries = []
+    for item in expectations.entries:
+        state = after.inventory.get(item.address, {}).get(item.port)
+        reason = after.port_reasons.get(item.address, {}).get(item.port) if state else None
+        entries.append(
+            {
+                "key": item.key,
+                "expected_later_states": list(item.states),
+                "label": item.label,
+                "later": {"record": state or "not observed", "reason": reason},
+                "result": expectation_result(item, after),
+            }
+        )
+    return {
+        "source": str(expectations.source),
+        "sha256": expectations.sha256,
+        "notice": EXPECT_NOTICE,
+        "results": expectation_tally(expectations, after),
+        "entries": entries,
+    }
+
+
+def render_json(
+    before: Snapshot,
+    after: Snapshot,
+    changes: list[Change],
+    *,
+    context_note: str | None = None,
+    expectations: Expectations | None = None,
+) -> str:
+    """Render the same evidence as render_markdown for scripts.
+
+    A missing record is the string "not observed", never null, so it cannot be read as closed.
+    """
+    counts = dict.fromkeys(CATEGORIES, 0)
+    findings = []
+    for change in changes:
+        category, explanation, check = _finding_text(change)
+        counts[category] += 1
+        findings.append(
+            {
+                "key": finding_key(change),
+                "kind": "address" if change.port is None else "port",
+                "category": category,
+                "address": change.address,
+                "port": change.port,
+                "earlier": _side_json(before, change, change.before),
+                "later": _side_json(after, change, change.after),
+                "explanation": explanation,
+                "suggested_check": check,
+            }
+        )
+    document = {
+        "format": "watchpost-comparison",
+        "format_version": 1,
+        "notice": NOTICE,
+        "context": {"confirmed_by_user": True, "note": context_note},
+        "snapshots": {"earlier": _snapshot_json(before), "later": _snapshot_json(after)},
+        "summary": {"total_differences": len(changes), "by_category": counts},
+        "findings": findings,
+        "expectations": _expectations_json(expectations, after) if expectations else None,
+        "limitations": [*LIMITATIONS, *((EXPECT_LIMITATION,) if expectations else ())],
+    }
+    # ensure_ascii escapes controls and non-ASCII text from paths, notes, and labels.
+    return json.dumps(document, indent=2, ensure_ascii=True) + "\n"
 
 
 def evidence_lines(markdown: str) -> list[tuple[int, str]]:
@@ -273,7 +447,7 @@ def evidence_lines(markdown: str) -> list[tuple[int, str]]:
             if not (re.match(r"### [0-9]+\. ", line) or line == "## Limitations"):
                 continue
             in_field = False
-        if line in (SOURCE_LABEL, NOTE_LABEL):
+        if line in (SOURCE_LABEL, NOTE_LABEL, EXPECT_LABEL):
             label_next = True
         elif label_next and line.startswith("    "):
             line, label_next = "    (label)", False

@@ -24,6 +24,15 @@
   match, 1 on differences, and 2 on unusable input.
 - `.gitattributes` keeps the bundled examples byte-identical on every platform, so their
   recorded hashes match.
+- `compare --expect FILE` checks the reviewer's own expected later port states, written in TOML,
+  against explicit later records: matches, differs, or cannot be checked. Absence never matches.
+  Reports gain a "Your expectations" section, and `verify` takes the same `--expect` file.
+  See [the expectations milestone](docs/expectations-milestone.md).
+- `watchpost history` follows explicit observations across 2 to 50 saved snapshots and checks
+  each consecutive pair with the comparison gate.
+- `compare --format json` prints or saves the comparison as JSON. A missing record is the string
+  `"not observed"`, never `null`.
+- Synthetic expectation files for scenarios 1 and 2, and a third snapshot, `examples/rollback.xml`.
 
 ### Changed
 

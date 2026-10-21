@@ -3,24 +3,38 @@
 import argparse
 import hashlib
 import re
+import tomllib
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from ipaddress import IPv4Address
-from itertools import groupby, zip_longest
+from itertools import groupby, pairwise, zip_longest
 from pathlib import Path
 from xml.etree.ElementTree import Element, ParseError
 
 from defusedxml import ElementTree
 from defusedxml.common import DefusedXmlException
 
-from watchpost_report import NOTE_LABEL, evidence_lines, render_markdown, write_report
+from watchpost_report import (
+    EXPECT_HEADING,
+    NOTE_LABEL,
+    evidence_lines,
+    expectation_result,
+    expectation_tally,
+    render_json,
+    render_markdown,
+    write_report,
+)
 
 # ponytail: cap snapshots at 10 MiB for small labs; stream if larger inputs are needed.
 MAX_XML_BYTES = 10 * 1024 * 1024
+MAX_EXPECT_BYTES = 1024 * 1024
+MAX_HISTORY = 50
 PORT_STATES = {"open", "closed", "filtered", "unfiltered", "open|filtered", "closed|filtered"}
 HOST_STATES = {"up", "down", "unknown", "skipped"}
 MAX_NOTE_CHARS = 500
+# Labels appear inside Markdown code spans and table cells, so backticks and pipes are excluded.
+LABEL_PATTERN = r"[\w .,;:()'/&+-]{1,120}"
 
 # Address -> TCP port -> a value copied from that explicit <port> record.
 PortRecords = dict[str, dict[int, str]]
@@ -55,6 +69,24 @@ class Change:
     port: int | None
     before: str | None
     after: str | None
+
+
+@dataclass(frozen=True)
+class Expectation:
+    """A reviewer's own statement about a later port state. Watchpost cannot verify it."""
+
+    key: str
+    address: str
+    port: int
+    states: tuple[str, ...]
+    label: str | None
+
+
+@dataclass(frozen=True)
+class Expectations:
+    source: Path
+    sha256: str
+    entries: tuple[Expectation, ...]
 
 
 def _read_bytes(path: Path, kind: str = "Snapshot") -> bytes:
@@ -344,6 +376,38 @@ def compare_snapshots(
     return changes
 
 
+def history_timelines(
+    snapshots: list[Snapshot], *, same_context_confirmed: bool = False
+) -> list[tuple[str, list[str | None]]]:
+    """Gate each consecutive pair, then list records whose explicit observations differ.
+
+    Each timeline holds one value per snapshot; None means not observed, never closed.
+    """
+    if not same_context_confirmed:
+        raise ValueError(
+            "Confirm the same scan location, intended targets, and other scan settings."
+        )
+    if not 2 <= len(snapshots) <= MAX_HISTORY:
+        raise ValueError(f"History needs 2 to {MAX_HISTORY} snapshots, earliest first.")
+    for number, (earlier, later) in enumerate(pairwise(snapshots), 1):
+        try:
+            compare_snapshots(earlier, later, same_context_confirmed=True)
+        except ValueError as exc:
+            raise ValueError(f"Snapshots {number} and {number + 1}: {exc}") from exc
+    timelines: list[tuple[str, list[str | None]]] = []
+    addresses = set().union(*(snapshot.inventory for snapshot in snapshots))
+    for address in sorted(addresses, key=IPv4Address):
+        presence = ["observed" if address in snapshot.inventory else None for snapshot in snapshots]
+        if len(set(presence)) > 1:
+            timelines.append((address, presence))
+        records = [snapshot.inventory.get(address, {}) for snapshot in snapshots]
+        for port in sorted(set().union(*records)):
+            states = [ports.get(port) for ports in records]
+            if len(set(states)) > 1:
+                timelines.append((f"{address}/tcp/{port}", states))
+    return timelines
+
+
 def _context_note(note: str | None) -> str | None:
     """Check the user's optional context note. Watchpost records it but cannot verify it."""
     if note is None:
@@ -353,6 +417,60 @@ def _context_note(note: str | None) -> str | None:
     if len(note) > MAX_NOTE_CHARS:
         raise ValueError(f"Context note is longer than {MAX_NOTE_CHARS} characters. Shorten it.")
     return note
+
+
+def read_expectations(path: Path) -> Expectations:
+    """Read the reviewer's own expected later port states from a TOML file."""
+    return parse_expectations(_read_bytes(path, "Expectations file"), path)
+
+
+def parse_expectations(data: bytes, source: Path) -> Expectations:
+    """Validate expectations held in memory; source is only a label for output."""
+    if len(data) > MAX_EXPECT_BYTES:
+        raise ValueError("Expectations file exceeds the 1 MiB limit.")
+    try:
+        document = tomllib.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+        raise ValueError(f"Expectations file is not valid UTF-8 TOML: {exc}") from exc
+    tables = document.get("expect")
+    if set(document) != {"expect"} or not isinstance(tables, dict) or not tables:
+        raise ValueError(
+            "Expectations file needs one or more "
+            '[expect."ADDRESS/tcp/PORT"] tables and nothing else.'
+        )
+    entries = sorted(
+        (_expectation(key, entry) for key, entry in tables.items()),
+        key=lambda item: (IPv4Address(item.address), item.port),
+    )
+    return Expectations(source, hashlib.sha256(data).hexdigest(), tuple(entries))
+
+
+def _expectation(key: str, entry: object) -> Expectation:
+    match = re.fullmatch(r"([0-9]{1,3}(?:\.[0-9]{1,3}){3})/tcp/([0-9]{1,5})", key)
+    try:
+        valid = bool(match) and str(IPv4Address(match[1])) == match[1] and int(match[2]) < 65536
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ValueError(f"Expectation key {key!a} must look like 192.0.2.10/tcp/3000.")
+    if not isinstance(entry, dict) or "state" not in entry or set(entry) - {"state", "label"}:
+        raise ValueError(f"Expectation {key} needs a state and may have a label, nothing else.")
+    states = entry["state"] if isinstance(entry["state"], list) else [entry["state"]]
+    if not states or not all(isinstance(state, str) and state in PORT_STATES for state in states):
+        raise ValueError(
+            f'Expectation {key} needs Nmap port states, such as "open" or ["closed", "filtered"].'
+        )
+    if len(set(states)) != len(states):
+        raise ValueError(f"Expectation {key} lists the same state twice.")
+    label = entry.get("label")
+    if label is not None and not (
+        isinstance(label, str) and label.strip() and re.fullmatch(LABEL_PATTERN, label)
+    ):
+        raise ValueError(
+            f"Expectation {key} label must be 1 to 120 letters, digits, spaces, "
+            "or . , ; : ( ) ' / & + - characters."
+        )
+    return Expectation(key, match[1], int(match[2]), tuple(sorted(states)), label)
 
 
 def compare_report(
@@ -376,7 +494,9 @@ def compare_report(
     return render_markdown(before, after, changes, context_note=note)
 
 
-def verify_report(report: Path, before: Path, after: Path) -> list[Mismatch]:
+def verify_report(
+    report: Path, before: Path, after: Path, expect: Path | None = None
+) -> list[Mismatch]:
     """Regenerate a saved report from its snapshots and list the evidence lines that differ."""
     data = _read_bytes(report, "Report")
     if len(data) > MAX_XML_BYTES:
@@ -385,12 +505,18 @@ def verify_report(report: Path, before: Path, after: Path) -> list[Mismatch]:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise ValueError("Report is not UTF-8 text. Use a report saved by compare.") from exc
+    lines = text.splitlines()
+    if EXPECT_HEADING in lines and expect is None:
+        raise ValueError("This report records expectations. Pass the same file with --expect.")
+    expectations = None if expect is None else read_expectations(expect)
     earlier, later = read_snapshot(before), read_snapshot(after)
     # The report already records the user's confirmation; verify makes no new comparison.
     changes = compare_snapshots(earlier, later, same_context_confirmed=True)
     # The note is a user label like the source paths, so only its presence is compared.
-    note = "(not checked)" if NOTE_LABEL in text.splitlines() else None
-    expected = render_markdown(earlier, later, changes, context_note=note)
+    note = "(not checked)" if NOTE_LABEL in lines else None
+    expected = render_markdown(
+        earlier, later, changes, context_note=note, expectations=expectations
+    )
     problems: list[Mismatch] = []
     for found, wanted in zip_longest(evidence_lines(text), evidence_lines(expected)):
         number, line = found if found is not None else (None, None)
@@ -477,8 +603,68 @@ def _format_inspection(root: Element, source: Path) -> str:
     return "\n".join(lines)
 
 
+def _format_expectations(expectations: Expectations, after: Snapshot) -> list[str]:
+    lines = [f"Expectations (your own statements, not verified): {str(expectations.source)!a}"]
+    for item in expectations.entries:
+        state = after.inventory.get(item.address, {}).get(item.port)
+        reason = after.port_reasons.get(item.address, {}).get(item.port)
+        later = "not observed" if state is None else _with_reason(state, reason)
+        label = f" [{item.label}]" if item.label else ""
+        lines.append(
+            f"  {item.key}: expected {' or '.join(item.states)}; later {later} -> "
+            f"{expectation_result(item, after)}{label}"
+        )
+    tally = expectation_tally(expectations, after)
+    lines.append(
+        f"Expectation results: matches {tally['matches']}; differs {tally['differs']}; "
+        f"cannot be checked {tally['cannot be checked']}"
+    )
+    return lines
+
+
+def _format_history(
+    snapshots: list[Snapshot], timelines: list[tuple[str, list[str | None]]]
+) -> str:
+    first = snapshots[0]
+    lines = ["Snapshot history (not a security verdict)"]
+    for number, snapshot in enumerate(snapshots, 1):
+        lines.extend([f"{number}: {str(snapshot.source)!a}", f"  UTC window: {_window(snapshot)}"])
+    lines.extend(
+        [
+            f"Scan: TCP {first.method}; Nmap {first.version}; {len(first.coverage)} declared ports",
+            "Context: same location, intended targets, and other settings confirmed by user.",
+            f"Records with differences: {len(timelines)}",
+        ]
+    )
+    if not timelines:
+        lines.append("No observed changes in explicit IPv4/TCP records across the series.")
+    for key, values in timelines:
+        address, _, port = key.partition("/tcp/")
+        steps = []
+        for snapshot, value in zip(snapshots, values, strict=True):
+            if value is None or not port:
+                steps.append(value or "not observed")
+            else:
+                reason = snapshot.port_reasons.get(address, {}).get(int(port))
+                steps.append(_with_reason(value, reason))
+        lines.append(f"{key}: {' -> '.join(steps)}")
+    lines.extend(
+        [
+            "Missing and grouped port records are not classified as closed.",
+            "IP addresses are not device identities; port numbers are not application identities.",
+            "Each step passed the same checks as compare. Compare a pair for host context.",
+            "Context is user-confirmed, not independently verified by Watchpost.",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _format_comparison(
-    before: Snapshot, after: Snapshot, changes: list[Change], note: str | None = None
+    before: Snapshot,
+    after: Snapshot,
+    changes: list[Change],
+    note: str | None = None,
+    expectations: Expectations | None = None,
 ) -> str:
     lines = [
         "Snapshot comparison (not a security verdict)",
@@ -518,6 +704,8 @@ def _format_comparison(
                 f"  Grouped records: {_grouped_side(before, change.address)} -> "
                 f"{_grouped_side(after, change.address)} (not evidence for this port)"
             )
+    if expectations is not None:
+        lines.extend(_format_expectations(expectations, after))
     lines.extend(
         [
             "Missing and grouped port records are not classified as closed.",
@@ -526,6 +714,8 @@ def _format_comparison(
             "Context is user-confirmed, not independently verified by Watchpost.",
         ]
     )
+    if expectations is not None:
+        lines.append("A match is not a safety verdict, and a difference is not proof of a problem.")
     return "\n".join(lines)
 
 
@@ -561,6 +751,27 @@ def _format_verification(problems: list[Mismatch]) -> str:
     return "\n".join(lines)
 
 
+def _run_compare(args: argparse.Namespace) -> int:
+    note = _context_note(args.context_note)
+    expectations = None if args.expect is None else read_expectations(args.expect)
+    before, after = read_snapshot(args.before), read_snapshot(args.after)
+    changes = compare_snapshots(before, after, same_context_confirmed=args.confirm_same_context)
+    options = {"context_note": note, "expectations": expectations}
+    if args.format == "json":
+        content = render_json(before, after, changes, **options)
+    elif args.output is not None:
+        content = render_markdown(before, after, changes, **options)
+    else:
+        print(_format_comparison(before, after, changes, note, expectations))
+        return 0
+    if args.output is None:
+        print(content, end="")
+    else:
+        write_report(args.output, content)
+        print(f"Report saved to {str(args.output)!a}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="watchpost",
@@ -582,12 +793,36 @@ def main(argv: list[str] | None = None) -> int:
         help="Confirm the same scan location, intended targets, and other Nmap settings.",
     )
     compare.add_argument(
-        "--output", type=Path, help="Save a Markdown report to a new file; never overwrite."
+        "--output", type=Path, help="Save the report to a new file; never overwrite."
+    )
+    compare.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="text prints a summary or saves Markdown with --output; json prints or saves JSON.",
     )
     compare.add_argument(
         "--context-note",
         metavar="TEXT",
         help="Record your own description of the scan context. Watchpost cannot verify it.",
+    )
+    compare.add_argument(
+        "--expect",
+        type=Path,
+        metavar="FILE",
+        help="TOML file of your own expected later port states, compared with explicit records.",
+    )
+    history = commands.add_parser(
+        "history", help="Follow explicit observations across a series of saved scans."
+    )
+    history.add_argument(
+        "snapshots", type=Path, nargs="+", help="Completed Nmap XML exports, earliest first."
+    )
+    history.add_argument(
+        "--confirm-same-context",
+        action="store_true",
+        required=True,
+        help="Confirm every scan used the same location, intended targets, and Nmap settings.",
     )
     verify = commands.add_parser(
         "verify", help="Check a saved report against the two snapshots it was made from."
@@ -595,25 +830,26 @@ def main(argv: list[str] | None = None) -> int:
     verify.add_argument("report", type=Path, help="Markdown report saved by compare --output.")
     verify.add_argument("before", type=Path, help="Earlier Nmap XML export used for the report.")
     verify.add_argument("after", type=Path, help="Later Nmap XML export used for the report.")
+    verify.add_argument(
+        "--expect", type=Path, metavar="FILE", help="The expectations file the report used."
+    )
     args = parser.parse_args(argv)
     try:
         if args.command == "verify":
-            problems = verify_report(args.report, args.before, args.after)
+            problems = verify_report(args.report, args.before, args.after, args.expect)
             print(_format_verification(problems))
             return 1 if problems else 0
-        if args.command == "compare":
-            note = _context_note(args.context_note)
-            before, after = read_snapshot(args.before), read_snapshot(args.after)
-            changes = compare_snapshots(
-                before, after, same_context_confirmed=args.confirm_same_context
+        if args.command == "history":
+            if not 2 <= len(args.snapshots) <= MAX_HISTORY:
+                raise ValueError(f"History needs 2 to {MAX_HISTORY} snapshots, earliest first.")
+            snapshots = [read_snapshot(path) for path in args.snapshots]
+            timelines = history_timelines(
+                snapshots, same_context_confirmed=args.confirm_same_context
             )
-            if args.output is None:
-                print(_format_comparison(before, after, changes, note))
-            else:
-                report = render_markdown(before, after, changes, context_note=note)
-                write_report(args.output, report)
-                print(f"Report saved to {str(args.output)!a}")
+            print(_format_history(snapshots, timelines))
             return 0
+        if args.command == "compare":
+            return _run_compare(args)
         inspection = _format_inspection(_read_root(args.snapshot), args.snapshot)
     except (OSError, ValueError) as exc:
         parser.exit(2, f"watchpost: error: {exc}\n")

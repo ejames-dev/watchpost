@@ -29,8 +29,11 @@ For real inputs, confirm those conditions before you use the flag.
 | [baseline.xml](../examples/baseline.xml) | Earlier completed scan, 2026-01-01 at 00:00:00–00:00:01 UTC |
 | [after.xml](../examples/after.xml) | Later completed scan, 00:01:00–00:01:01 UTC |
 | [incomplete.xml](../examples/incomplete.xml) | Alternative later scan with a reported host timeout |
+| [rollback.xml](../examples/rollback.xml) | Follow-up completed scan, 00:02:00–00:02:01 UTC |
+| [expected-deployment.toml](../examples/expected-deployment.toml) | Reviewer expectations for scenario 1 |
+| [backend-policy.toml](../examples/backend-policy.toml) | Reviewer expectations for scenario 2 |
 
-All three declare Nmap 7.95, TCP connect scanning, and ports 22, 80, 443, and 3000.
+All four XML files declare Nmap 7.95, TCP connect scanning, and ports 22, 80, 443, and 3000.
 Those matching fields alone do not make the incomplete file suitable for comparison.
 
 ## 1. Expected deployment
@@ -77,6 +80,20 @@ uv run --offline watchpost verify reports/expected-deployment.md \
 The output starts with `Report evidence matches both snapshots.` Notes in the review fields do
 not affect the check.
 
+### Record the plan as expectations
+
+[expected-deployment.toml](../examples/expected-deployment.toml) writes the fictional plan as the
+reviewer's own expectations for the later snapshot:
+
+```bash
+uv run --offline watchpost compare examples/baseline.xml examples/after.xml \
+  --confirm-same-context --expect examples/expected-deployment.toml
+```
+
+Expected results: TCP 3000 and TCP 22 on `192.0.2.10` match. The expectation for TCP 3000 on
+`192.0.2.20` cannot be checked: that port is only part of a grouped closed count, which is not an
+explicit record. A match is the reviewer's plan agreeing with the evidence, not a safety verdict.
+
 ### Review the finding
 
 1. Compare the finding with the approved deployment plan and permitted source networks.
@@ -117,6 +134,16 @@ Expected exit code: **0**. Open `reports/backend-exposure.md`.
 The evidence and generated report content are identical to scenario 1, before you add notes.
 The report does not contain an automatic "unintended exposure" classification.
 
+To record this policy instead, use [backend-policy.toml](../examples/backend-policy.toml):
+
+```bash
+uv run --offline watchpost compare examples/baseline.xml examples/after.xml \
+  --confirm-same-context --expect examples/backend-policy.toml
+```
+
+Expected result: TCP 3000 on `192.0.2.10` differs from the expected `closed` or `filtered`.
+The evidence lines are the same as in scenario 1. Only the reviewer's expectations changed.
+
 ### Review the finding
 
 1. Compare the later `open` observation with the policy that prohibits direct backend access.
@@ -139,6 +166,23 @@ The report does not contain an automatic "unintended exposure" classification.
 Watchpost does not apply firewall changes or close ports.
 After an authorized correction, a separate completed scan can supply new evidence.
 Keep the original snapshots and review notes. Use a new report filename for the follow-up.
+
+[rollback.xml](../examples/rollback.xml) is a fictional follow-up scan two minutes after the
+baseline. Follow the record across all three snapshots:
+
+```bash
+uv run --offline watchpost history examples/baseline.xml examples/after.xml \
+  examples/rollback.xml --confirm-same-context
+```
+
+Expected timeline:
+
+```text
+192.0.2.10/tcp/3000: closed (conn-refused) -> open (syn-ack) -> closed (conn-refused)
+```
+
+The later `closed` record is evidence from that scan location only. It does not prove the
+backend is unreachable from every network, and it does not explain what changed.
 
 **Lesson from scenarios 1 and 2:** the evidence stays the same, but the intended access policy changes the human interpretation.
 

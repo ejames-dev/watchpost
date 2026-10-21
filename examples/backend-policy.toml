@@ -1,0 +1,6 @@
+# Synthetic expectations for scenario 2 (unintended backend exposure). Fictional policy.
+# These are a reviewer's own statements about the later snapshot, not scan evidence.
+
+[expect."192.0.2.10/tcp/3000"]
+state = ["closed", "filtered"]
+label = "Backend reachable only through the local reverse proxy"
