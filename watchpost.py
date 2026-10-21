@@ -561,7 +561,9 @@ def verify_report(
     """Regenerate a saved report from its snapshots and list the evidence lines that differ."""
     data = _read_bytes(report, "Report")
     if len(data) > MAX_XML_BYTES:
-        raise ValueError("Report exceeds the 10 MiB limit. Use a report saved by compare.")
+        raise ValueError(
+            f"Report exceeds the {MAX_XML_MIB} MiB limit. Use a report saved by compare."
+        )
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
