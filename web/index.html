@@ -43,6 +43,13 @@
         </span>
       </label>
 
+      <label class="note">
+        <span class="note-title">Context note <small>(optional)</small></span>
+        <input type="text" name="note" maxlength="500" autocomplete="off"
+          placeholder="For example: scanner on the users VLAN, same laptop for both scans">
+        <small>Recorded in the report as your own statement. Watchpost cannot verify it.</small>
+      </label>
+
       <div class="actions">
         <button type="submit" disabled>Compare</button>
         <p id="status" role="status" aria-live="polite">Loading the Python runtime…</p>

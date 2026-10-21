@@ -61,10 +61,21 @@ The report matches the [bundled sample](../examples/report.md).
 | Earlier evidence | `closed`, reason `conn-refused` |
 | Later evidence | `open`, reason `syn-ack` |
 | Host status | `up`, reason `user-set`, in both snapshots |
+| Finding key | `192.0.2.10/tcp/3000` |
 
 Both values come from explicit `<port>` records, not grouped counts.
 The reasons show how Nmap classified each state. They do not explain why the port opened.
 The report does not say when the change happened or which process caused it.
+
+After you add review notes, you can check that the report still matches its inputs:
+
+```bash
+uv run --offline watchpost verify reports/expected-deployment.md \
+  examples/baseline.xml examples/after.xml
+```
+
+The output starts with `Report evidence matches both snapshots.` Notes in the review fields do
+not affect the check.
 
 ### Review the finding
 

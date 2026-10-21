@@ -3,12 +3,24 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from watchpost import Change, Snapshot
+
+# Each label introduces an indented, escaped literal: text the user supplied, never markup.
+SOURCE_LABEL = "Source path (escaped literal):"
+NOTE_LABEL = "User's context note (escaped literal, not verified by Watchpost):"
+# Reviewers fill these in after generation, so verification skips their contents.
+REVIEW_FIELDS = ("**Investigation notes:**", "**Conclusion:**")
+
+
+def finding_key(change: Change) -> str:
+    """Name a finding by its evidence, so notes can refer to it across reports."""
+    return change.address if change.port is None else f"{change.address}/tcp/{change.port}"
 
 
 def _with_reason(value: str, reason: str | None) -> str:
@@ -30,6 +42,13 @@ def _host_status(snapshot: Snapshot, address: str) -> str:
     if address not in snapshot.host_status:
         return "status not recorded"
     return _with_reason(*snapshot.host_status[address])
+
+
+def _grouped(snapshot: Snapshot, address: str) -> str:
+    if address not in snapshot.inventory:
+        return "`not observed`"
+    counts = sorted(snapshot.grouped_ports.get(address, {}).items())
+    return "; ".join(f"{count} grouped as `{state}`" for state, count in counts) or "none"
 
 
 def _finding_text(change: Change) -> tuple[str, str, str]:
@@ -86,10 +105,11 @@ def _source_section(label: str, snapshot: Snapshot) -> list[str]:
     return [
         f"### {label} snapshot",
         "",
-        "Source path (escaped literal):",
+        SOURCE_LABEL,
         "",
         f"    {str(snapshot.source)!a}",
         "",
+        f"- SHA-256: `{snapshot.sha256}`",
         f"- UTC start: `{snapshot.started.isoformat()}`",
         f"- UTC finish: `{snapshot.finished.isoformat()}`",
         f"- Nmap version: `{snapshot.version}`",
@@ -101,8 +121,15 @@ def _source_section(label: str, snapshot: Snapshot) -> list[str]:
     ]
 
 
-def render_markdown(before: Snapshot, after: Snapshot, changes: list[Change]) -> str:
+def render_markdown(
+    before: Snapshot,
+    after: Snapshot,
+    changes: list[Change],
+    *,
+    context_note: str | None = None,
+) -> str:
     """Render read_snapshot/compare_snapshots results after the comparison gate passes."""
+    note = [] if context_note is None else [NOTE_LABEL, "", f"    {context_note!a}", ""]
     counts = dict.fromkeys(
         (
             "Port state changed",
@@ -120,16 +147,26 @@ def render_markdown(before: Snapshot, after: Snapshot, changes: list[Change]) ->
         record = f"IPv4 `{change.address}`"
         if change.port is not None:
             record += f", TCP port `{change.port}` (numeric ID)"
+        evidence = [
+            f"- **Key:** `{finding_key(change)}`",
+            f"- **Record:** {record}",
+            f"- **Earlier evidence:** {_evidence(before, change, change.before)} "
+            "— Earlier snapshot",
+            f"- **Later evidence:** {_evidence(after, change, change.after)} — Later snapshot",
+            f"- **Host status:** Earlier {_host_status(before, change.address)}; "
+            f"Later {_host_status(after, change.address)}",
+        ]
+        if change.port is not None and None in (change.before, change.after):
+            evidence.append(
+                f"- **Grouped records on this host:** Earlier {_grouped(before, change.address)}; "
+                f"Later {_grouped(after, change.address)}. Watchpost does not expand grouped "
+                "counts, so they are not evidence for this port."
+            )
         findings.extend(
             [
                 f"### {number}. {category}",
                 "",
-                f"- **Record:** {record}",
-                f"- **Earlier evidence:** {_evidence(before, change, change.before)} "
-                "— Earlier snapshot",
-                f"- **Later evidence:** {_evidence(after, change, change.after)} — Later snapshot",
-                f"- **Host status:** Earlier {_host_status(before, change.address)}; "
-                f"Later {_host_status(after, change.address)}",
+                *evidence,
                 "",
                 f"**Explanation:** {explanation}",
                 "",
@@ -153,6 +190,7 @@ def render_markdown(before: Snapshot, after: Snapshot, changes: list[Change]) ->
         "- Watchpost checked completion, timestamps, Nmap version, scan method, and port coverage.",
         "- Matching metadata does not independently establish matching scan conditions.",
         "",
+        *note,
         *_source_section("Earlier", before),
         *_source_section("Later", after),
         "## Summary",
@@ -190,11 +228,14 @@ def render_markdown(before: Snapshot, after: Snapshot, changes: list[Change]) ->
         "- Filtered and uncertain states are preserved, not treated as confirmed open or closed.",
         "- Host status and reasons are shown as recorded evidence. They are not compared or used "
         "to reclassify any record.",
-        "- Hostnames, service names, scripts, and grouped states are not compared.",
+        "- Grouped port counts are shown as host context. They are not compared or expanded into "
+        "per-port states.",
+        "- Hostnames, service names, and scripts are not compared.",
         "- These are scan-window observations, not proof of when or why a change happened.",
         "- User confirmation is not independently verified by Watchpost.",
-        "- Keep the original XML files with this report; "
-        "references do not embed or authenticate them.",
+        "- Keep the original XML files with this report. The SHA-256 hashes identify them, and "
+        "`watchpost verify` rechecks the evidence. A hash does not prove who made a file, when, "
+        "or where.",
         "- Reports contain network details and are not anonymous. Review before sharing.",
         "",
         "## Human review",
@@ -209,6 +250,35 @@ def render_markdown(before: Snapshot, after: Snapshot, changes: list[Change]) ->
         "",
     ]
     return "\n".join(lines)
+
+
+def evidence_lines(markdown: str) -> list[tuple[int, str]]:
+    """Return a report's generated lines by number, without user labels or review notes.
+
+    Source paths and the context note are labels the user supplied; review fields are filled in
+    after generation. Neither is evidence, so a report still verifies after a review.
+    """
+    kept: list[tuple[int, str]] = []
+    in_field = label_next = False
+    for number, line in enumerate(markdown.splitlines(), 1):
+        if line == "## Human review":
+            kept.append((number, line))
+            break
+        field = next((name for name in REVIEW_FIELDS if line.startswith(name)), None)
+        if field is not None:
+            kept.append((number, field))
+            in_field = True
+            continue
+        if in_field:
+            if not (re.match(r"### [0-9]+\. ", line) or line == "## Limitations"):
+                continue
+            in_field = False
+        if line in (SOURCE_LABEL, NOTE_LABEL):
+            label_next = True
+        elif label_next and line.startswith("    "):
+            line, label_next = "    (label)", False
+        kept.append((number, line))
+    return kept
 
 
 def write_report(path: Path, content: str) -> None:

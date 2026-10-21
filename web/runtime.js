@@ -7,7 +7,7 @@ sys.path.insert(0, "/watchpost")
 from watchpost import compare_report
 
 
-def watchpost_compare(before, after, before_name, after_name, confirmed):
+def watchpost_compare(before, after, before_name, after_name, confirmed, note):
     try:
         report = compare_report(
             before.to_bytes(),
@@ -15,6 +15,7 @@ def watchpost_compare(before, after, before_name, after_name, confirmed):
             before_name=before_name,
             after_name=after_name,
             same_context_confirmed=confirmed,
+            context_note=note or None,
         )
     except ValueError as exc:
         return False, str(exc)
@@ -35,8 +36,8 @@ export async function startWatchpost(loadPyodide, { indexURL, sources, wheel }) 
   pyodide.runPython(GLUE);
   const compare = pyodide.globals.get("watchpost_compare");
 
-  return (before, after, beforeName, afterName, confirmed) => {
-    const result = compare(before, after, beforeName, afterName, confirmed);
+  return (before, after, beforeName, afterName, confirmed, note = "") => {
+    const result = compare(before, after, beforeName, afterName, confirmed, note);
     try {
       const [ok, text] = result.toJs();
       return { ok, text };

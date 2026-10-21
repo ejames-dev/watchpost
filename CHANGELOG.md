@@ -13,10 +13,21 @@
   whether the file passes the checks that need only one snapshot.
 - Refused comparisons name the differing scan methods, Nmap versions, port coverage (as ranges),
   scan windows, declared port counts, and ports outside the declared coverage.
+- Port observations show each snapshot's grouped `<extraports>` counts for the host as labeled
+  context. The counts are never expanded into per-port states or compared.
+- `compare --context-note TEXT` and an optional browser field record the user's own description
+  of the scan context as an escaped literal. Watchpost cannot verify it.
+- Reports record each input file's SHA-256 hash and a stable key for each finding,
+  such as `192.0.2.10/tcp/3000`.
+- `watchpost verify REPORT BEFORE AFTER` regenerates a saved report and lists the generated lines
+  that differ, skipping source path labels, the context note, and review fields. It exits 0 on a
+  match, 1 on differences, and 2 on unusable input.
+- `.gitattributes` keeps the bundled examples byte-identical on every platform, so their
+  recorded hashes match.
 
 ### Changed
 
-- Malformed host status or reason values are rejected like other malformed records.
+- Malformed host status, reason, or grouped port records are rejected like other malformed records.
 - `examples/report.md` is regenerated with the new evidence lines.
 
 ## 0.0.1

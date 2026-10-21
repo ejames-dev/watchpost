@@ -1,29 +1,35 @@
 """Inspect, compare, and report saved Nmap observations without network requests."""
 
 import argparse
+import hashlib
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from ipaddress import IPv4Address
-from itertools import groupby
+from itertools import groupby, zip_longest
 from pathlib import Path
 from xml.etree.ElementTree import Element, ParseError
 
 from defusedxml import ElementTree
 from defusedxml.common import DefusedXmlException
 
-from watchpost_report import render_markdown, write_report
+from watchpost_report import NOTE_LABEL, evidence_lines, render_markdown, write_report
 
 # ponytail: cap snapshots at 10 MiB for small labs; stream if larger inputs are needed.
 MAX_XML_BYTES = 10 * 1024 * 1024
 PORT_STATES = {"open", "closed", "filtered", "unfiltered", "open|filtered", "closed|filtered"}
 HOST_STATES = {"up", "down", "unknown", "skipped"}
+MAX_NOTE_CHARS = 500
 
 # Address -> TCP port -> a value copied from that explicit <port> record.
 PortRecords = dict[str, dict[int, str]]
 # Address -> (status, reason) copied from the host's <status> record, when there is one.
 HostStatus = dict[str, tuple[str, str | None]]
+# Address -> Nmap state -> count from the host's grouped <extraports> records.
+GroupedCounts = dict[str, dict[str, int]]
+# (report line number, report line, expected line); None marks a missing line.
+Mismatch = tuple[int | None, str | None, str | None]
 
 
 @dataclass(frozen=True)
@@ -38,6 +44,9 @@ class Snapshot:
     # Evidence shown beside findings. It never changes how observations are compared.
     port_reasons: PortRecords = field(default_factory=dict)
     host_status: HostStatus = field(default_factory=dict)
+    grouped_ports: GroupedCounts = field(default_factory=dict)
+    # Identifies the exact input bytes. It does not prove who made the file, when, or where.
+    sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -48,12 +57,17 @@ class Change:
     after: str | None
 
 
+def _read_bytes(path: Path, kind: str = "Snapshot") -> bytes:
+    """Read at most one byte past the size limit so oversized files are always rejected."""
+    if not path.is_file():
+        raise ValueError(f"{kind} must be an existing regular file. Check the input path.")
+    with path.open("rb") as source:
+        return source.read(MAX_XML_BYTES + 1)
+
+
 def _read_root(path: Path) -> Element:
     """Safely load a completed TCP Nmap export file without resolving external content."""
-    if not path.is_file():
-        raise ValueError("Snapshot must be an existing regular file. Check the input path.")
-    with path.open("rb") as source:
-        return _parse_root(source.read(MAX_XML_BYTES + 1))
+    return _parse_root(_read_bytes(path))
 
 
 def _parse_root(data: bytes) -> Element:
@@ -91,11 +105,14 @@ def _reason(element: Element, record: str) -> str | None:
     return reason
 
 
-def _records_from_xml(root: Element) -> tuple[PortRecords, PortRecords, HostStatus]:
-    """Read explicit port states, plus the reasons and host status Nmap recorded with them."""
+def _records_from_xml(
+    root: Element,
+) -> tuple[PortRecords, PortRecords, HostStatus, GroupedCounts]:
+    """Read explicit port states, plus the reasons, host status, and grouped counts beside them."""
     inventory: PortRecords = {}
     port_reasons: PortRecords = {}
     host_status: HostStatus = {}
+    grouped_ports: GroupedCounts = {}
     for host in root.findall("host"):
         if host.get("timedout") not in (None, "false", "0"):
             raise ValueError("Host scan is incomplete (timeout). Use a completed snapshot.")
@@ -138,9 +155,24 @@ def _records_from_xml(root: Element) -> tuple[PortRecords, PortRecords, HostStat
             reason = _reason(states[0], f"{address} {number}/tcp")
             if reason is not None:
                 reasons[number] = reason
+        # Counts only: grouped records are never expanded into per-port states.
+        grouped = {}
+        for record in host.findall("ports/extraports"):
+            state, count = record.get("state", ""), record.get("count", "")
+            if (
+                state not in PORT_STATES
+                or state in grouped
+                or not re.fullmatch(r"[0-9]{1,5}", count)
+            ):
+                raise ValueError(
+                    f"Unrecognized grouped port record for {address}. "
+                    "Expected one count for each recognized Nmap state."
+                )
+            grouped[state] = int(count)
         inventory[address] = ports
         port_reasons[address] = reasons
-    return inventory, port_reasons, host_status
+        grouped_ports[address] = grouped
+    return inventory, port_reasons, host_status, grouped_ports
 
 
 def read_inventory(path: Path) -> dict[str, dict[int, str]]:
@@ -189,16 +221,17 @@ def _port_ranges(ports: Iterable[int], limit: int = 10) -> str:
 
 def read_snapshot(path: Path) -> Snapshot:
     """Read the stronger metadata needed for a conservative comparison."""
-    return _snapshot_from_root(_read_root(path), path)
+    return parse_snapshot(_read_bytes(path), path)
 
 
 def parse_snapshot(data: bytes, source: Path) -> Snapshot:
     """Validate snapshot bytes already in memory; source is only a label for output."""
-    return _snapshot_from_root(_parse_root(data), source)
+    root = _parse_root(data)
+    return _snapshot_from_root(root, source, hashlib.sha256(data).hexdigest())
 
 
-def _snapshot_from_root(root: Element, source: Path) -> Snapshot:
-    inventory, port_reasons, host_status = _records_from_xml(root)
+def _snapshot_from_root(root: Element, source: Path, sha256: str = "") -> Snapshot:
+    inventory, port_reasons, host_status, grouped_ports = _records_from_xml(root)
     scans = root.findall("scaninfo")
     if len(scans) != 1 or scans[0].get("type") not in {"connect", "syn"}:
         raise ValueError("Comparison supports exactly one TCP connect or SYN scan per snapshot.")
@@ -239,6 +272,8 @@ def _snapshot_from_root(root: Element, source: Path) -> Snapshot:
         inventory,
         port_reasons,
         host_status,
+        grouped_ports,
+        sha256,
     )
 
 
@@ -309,6 +344,17 @@ def compare_snapshots(
     return changes
 
 
+def _context_note(note: str | None) -> str | None:
+    """Check the user's optional context note. Watchpost records it but cannot verify it."""
+    if note is None:
+        return None
+    if not note.strip():
+        raise ValueError("Context note is empty. Describe the scan context or leave it out.")
+    if len(note) > MAX_NOTE_CHARS:
+        raise ValueError(f"Context note is longer than {MAX_NOTE_CHARS} characters. Shorten it.")
+    return note
+
+
 def compare_report(
     before_xml: bytes,
     after_xml: bytes,
@@ -316,16 +362,42 @@ def compare_report(
     before_name: str,
     after_name: str,
     same_context_confirmed: bool = False,
+    context_note: str | None = None,
 ) -> str:
     """Return the Markdown report for two in-memory snapshots. No file or network access."""
     if not same_context_confirmed:
         raise ValueError(
             "Confirm the same scan location, intended targets, and other scan settings."
         )
+    note = _context_note(context_note)
     before = parse_snapshot(before_xml, Path(before_name))
     after = parse_snapshot(after_xml, Path(after_name))
     changes = compare_snapshots(before, after, same_context_confirmed=same_context_confirmed)
-    return render_markdown(before, after, changes)
+    return render_markdown(before, after, changes, context_note=note)
+
+
+def verify_report(report: Path, before: Path, after: Path) -> list[Mismatch]:
+    """Regenerate a saved report from its snapshots and list the evidence lines that differ."""
+    data = _read_bytes(report, "Report")
+    if len(data) > MAX_XML_BYTES:
+        raise ValueError("Report exceeds the 10 MiB limit. Use a report saved by compare.")
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("Report is not UTF-8 text. Use a report saved by compare.") from exc
+    earlier, later = read_snapshot(before), read_snapshot(after)
+    # The report already records the user's confirmation; verify makes no new comparison.
+    changes = compare_snapshots(earlier, later, same_context_confirmed=True)
+    # The note is a user label like the source paths, so only its presence is compared.
+    note = "(not checked)" if NOTE_LABEL in text.splitlines() else None
+    expected = render_markdown(earlier, later, changes, context_note=note)
+    problems: list[Mismatch] = []
+    for found, wanted in zip_longest(evidence_lines(text), evidence_lines(expected)):
+        number, line = found if found is not None else (None, None)
+        expected_line = wanted[1] if wanted is not None else None
+        if line != expected_line:
+            problems.append((number, line, expected_line))
+    return problems
 
 
 def _window(snapshot: Snapshot) -> str:
@@ -355,13 +427,26 @@ def _host_text(snapshot: Snapshot, address: str) -> str:
     return _status_text(snapshot.host_status, address)
 
 
+def _grouped_text(counts: dict[str, int]) -> str:
+    groups = (f"{count} grouped as {state}" for state, count in sorted(counts.items()))
+    return "; ".join(groups) or "none"
+
+
+def _grouped_side(snapshot: Snapshot, address: str) -> str:
+    if address not in snapshot.inventory:
+        return "not observed"
+    return _grouped_text(snapshot.grouped_ports.get(address, {}))
+
+
 def _format_inspection(root: Element, source: Path) -> str:
-    inventory, port_reasons, host_status = _records_from_xml(root)
+    inventory, port_reasons, host_status, grouped_ports = _records_from_xml(root)
     lines = ["IPv4/TCP observations (not a security verdict)"]
     if not inventory:
         lines.append("No IPv4 host observations.")
     for address in sorted(inventory, key=IPv4Address):
         lines.append(f"{address}  host status: {_status_text(host_status, address)}")
+        if grouped_ports[address]:
+            lines.append(f"  {_grouped_text(grouped_ports[address])}, not listed individually")
         ports, reasons = inventory[address], port_reasons[address]
         if not ports:
             lines.append("  No explicit TCP port observations.")
@@ -392,7 +477,9 @@ def _format_inspection(root: Element, source: Path) -> str:
     return "\n".join(lines)
 
 
-def _format_comparison(before: Snapshot, after: Snapshot, changes: list[Change]) -> str:
+def _format_comparison(
+    before: Snapshot, after: Snapshot, changes: list[Change], note: str | None = None
+) -> str:
     lines = [
         "Snapshot comparison (not a security verdict)",
         f"Earlier: {str(before.source)!a}",
@@ -401,8 +488,10 @@ def _format_comparison(before: Snapshot, after: Snapshot, changes: list[Change])
         f"  UTC window: {_window(after)}",
         f"Scan: TCP {before.method}; Nmap {before.version}; {len(before.coverage)} declared ports",
         "Context: same location, intended targets, and other settings confirmed by user.",
-        f"Observation differences: {len(changes)}",
     ]
+    if note is not None:
+        lines.append(f"Context note (user's statement, not verified): {note!a}")
+    lines.append(f"Observation differences: {len(changes)}")
     if not changes:
         lines.append("No observed changes in explicit IPv4/TCP records.")
     for change in changes:
@@ -424,6 +513,11 @@ def _format_comparison(before: Snapshot, after: Snapshot, changes: list[Change])
             f"  Host status: {_host_text(before, change.address)} -> "
             f"{_host_text(after, change.address)}"
         )
+        if label == "PORT OBSERVATION":
+            lines.append(
+                f"  Grouped records: {_grouped_side(before, change.address)} -> "
+                f"{_grouped_side(after, change.address)} (not evidence for this port)"
+            )
     lines.extend(
         [
             "Missing and grouped port records are not classified as closed.",
@@ -435,10 +529,43 @@ def _format_comparison(before: Snapshot, after: Snapshot, changes: list[Change])
     return "\n".join(lines)
 
 
+def _printable(text: str | None) -> str:
+    """Escape terminal controls in report text while keeping ordinary punctuation readable."""
+    if text is None:
+        return "(nothing)"
+    return "".join(char if char.isprintable() else ascii(char)[1:-1] for char in text)
+
+
+def _format_verification(problems: list[Mismatch]) -> str:
+    if not problems:
+        return "\n".join(
+            [
+                "Report evidence matches both snapshots.",
+                "Checked: SHA-256 hashes, scan metadata, counts, findings, and fixed wording.",
+                "Not checked: source path labels, the context note, and human review fields.",
+                "Matching hashes identify the files, not who made them, when, or where.",
+            ]
+        )
+    lines = ["Report evidence does not match these snapshots."]
+    for number, found, wanted in problems[:5]:
+        lines.extend(
+            [
+                f"  Line {number}:" if number is not None else "  After the last line:",
+                f"    found:    {_printable(found)}",
+                f"    expected: {_printable(wanted)}",
+            ]
+        )
+    hidden = len(problems) - 5
+    if hidden > 0:
+        lines.append(f"  ...and {hidden} more difference{'s' if hidden > 1 else ''}")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="watchpost",
         description="Inspect and compare saved Nmap XML locally. No scans or network requests.",
+        epilog="Exit codes: 0 success; 1 verify found differences; 2 invalid input or refusal.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     inspect = commands.add_parser(
@@ -457,17 +584,34 @@ def main(argv: list[str] | None = None) -> int:
     compare.add_argument(
         "--output", type=Path, help="Save a Markdown report to a new file; never overwrite."
     )
+    compare.add_argument(
+        "--context-note",
+        metavar="TEXT",
+        help="Record your own description of the scan context. Watchpost cannot verify it.",
+    )
+    verify = commands.add_parser(
+        "verify", help="Check a saved report against the two snapshots it was made from."
+    )
+    verify.add_argument("report", type=Path, help="Markdown report saved by compare --output.")
+    verify.add_argument("before", type=Path, help="Earlier Nmap XML export used for the report.")
+    verify.add_argument("after", type=Path, help="Later Nmap XML export used for the report.")
     args = parser.parse_args(argv)
     try:
+        if args.command == "verify":
+            problems = verify_report(args.report, args.before, args.after)
+            print(_format_verification(problems))
+            return 1 if problems else 0
         if args.command == "compare":
+            note = _context_note(args.context_note)
             before, after = read_snapshot(args.before), read_snapshot(args.after)
             changes = compare_snapshots(
                 before, after, same_context_confirmed=args.confirm_same_context
             )
             if args.output is None:
-                print(_format_comparison(before, after, changes))
+                print(_format_comparison(before, after, changes, note))
             else:
-                write_report(args.output, render_markdown(before, after, changes))
+                report = render_markdown(before, after, changes, context_note=note)
+                write_report(args.output, report)
                 print(f"Report saved to {str(args.output)!a}")
             return 0
         inspection = _format_inspection(_read_root(args.snapshot), args.snapshot)

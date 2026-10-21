@@ -1,5 +1,6 @@
 """Comparison tests use synthetic documentation addresses, never live scans."""
 
+import hashlib
 import io
 import re
 import subprocess
@@ -44,6 +45,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(snapshot.coverage, frozenset({22, 80, 443, 3000}))
         self.assertEqual(snapshot.inventory["192.0.2.10"][3000], "closed")
         self.assertEqual(snapshot.inventory["192.0.2.20"], {22: "open"})
+        self.assertEqual(snapshot.sha256, hashlib.sha256(EXAMPLE.read_bytes()).hexdigest())
 
     def test_reads_host_status_and_reasons_without_changing_comparisons(self):
         before = read_snapshot(EXAMPLE)
@@ -326,6 +328,50 @@ class SnapshotTests(unittest.TestCase):
             same_context_confirmed=True,
         )
         self.assertEqual(changes, [Change("192.0.2.10", 3000, "open", None)])
+        output = io.StringIO()
+        with redirect_stdout(output):
+            arguments = [str(self.path.with_name("before.xml")), str(self.path)]
+            self.assertEqual(main(["compare", *arguments, "--confirm-same-context"]), 0)
+        self.assertIn(
+            "  Grouped records: none -> 1 grouped as closed (not evidence for this port)\n",
+            output.getvalue(),
+        )
+        self.assertNotIn("-> closed", output.getvalue())
+
+    def test_context_note_is_recorded_as_an_escaped_unverified_statement(self):
+        self.snapshot(self.later_xml)
+        arguments = ["compare", str(EXAMPLE), str(self.path), "--confirm-same-context"]
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main([*arguments, "--context-note", "users VLAN\n\x1b[31m"]), 0)
+        self.assertIn(
+            "Context note (user's statement, not verified): 'users VLAN\\n\\x1b[31m'\n",
+            output.getvalue(),
+        )
+        self.assertNotIn("\x1b", output.getvalue())
+        for note, message in (("   ", "empty"), ("x" * 501, "500 characters")):
+            with self.subTest(message=message):
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with (
+                    redirect_stdout(stdout),
+                    redirect_stderr(stderr),
+                    self.assertRaises(SystemExit) as error,
+                ):
+                    main([*arguments, "--context-note", note])
+                self.assertEqual(error.exception.code, 2)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertIn(message, stderr.getvalue())
+
+    def test_grouped_counts_are_host_context_not_observations(self):
+        before = read_snapshot(EXAMPLE)
+        self.assertEqual(before.grouped_ports, {"192.0.2.10": {}, "192.0.2.20": {"closed": 3}})
+        regrouped = self.snapshot(
+            self.later_xml.replace(
+                '<extraports state="closed" count="3">', '<extraports state="filtered" count="9">'
+            )
+        )
+        self.assertEqual(regrouped.grouped_ports["192.0.2.20"], {"filtered": 9})
+        self.assertEqual(compare_snapshots(before, regrouped, same_context_confirmed=True), [])
 
     def test_new_port_observation_does_not_invent_its_previous_state(self):
         before_xml = EXAMPLE.read_text()
@@ -458,7 +504,9 @@ class SnapshotTests(unittest.TestCase):
         for expected in (
             "ADDRESS OBSERVATION 192.0.2.20: observed -> not observed\n"
             "  Host status: up (user-set) -> not observed\n",
-            "PORT OBSERVATION 192.0.2.20 22/tcp: open (syn-ack) -> not observed\n",
+            "PORT OBSERVATION 192.0.2.20 22/tcp: open (syn-ack) -> not observed\n"
+            "  Host status: up (user-set) -> not observed\n"
+            "  Grouped records: 3 grouped as closed -> not observed (not evidence for this port)\n",
             "ADDRESS OBSERVATION 192.0.2.30: not observed -> observed\n"
             "  Host status: not observed -> up (user-set)\n",
         ):
@@ -494,6 +542,7 @@ class SnapshotTests(unittest.TestCase):
             findings,
             "PORT OBSERVATION 192.0.2.20 22/tcp: open (syn-ack) -> not observed\n"
             "  Host status: up (user-set) -> down (no-response)\n"
+            "  Grouped records: 3 grouped as closed -> none (not evidence for this port)\n"
             "ADDRESS OBSERVATION 192.0.2.30: not observed -> observed\n"
             "  Host status: not observed -> down (no-response)\n",
         )

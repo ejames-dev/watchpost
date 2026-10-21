@@ -14,15 +14,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from watchpost import compare_snapshots, main, read_snapshot
-from watchpost_report import render_markdown, write_report
+from watchpost_report import NOTE_LABEL, render_markdown, write_report
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
 class ReportTests(unittest.TestCase):
     def report_for(self, old_inventory, new_inventory):
-        # Replaced inventories carry no recorded reasons or host status.
-        evidence = {"port_reasons": {}, "host_status": {}}
+        # Replaced inventories carry no recorded reasons, host status, or grouped counts.
+        evidence = {"port_reasons": {}, "host_status": {}, "grouped_ports": {}}
         before = replace(
             read_snapshot(EXAMPLES / "baseline.xml"), inventory=old_inventory, **evidence
         )
@@ -42,9 +42,13 @@ class ReportTests(unittest.TestCase):
             f"    {str(after.source)!a}",
             "2026-01-01T00:00:00+00:00",
             "2026-01-01T00:01:01+00:00",
+            f"    {str(before.source)!a}\n\n- SHA-256: `{before.sha256}`\n",
+            f"    {str(after.source)!a}\n\n- SHA-256: `{after.sha256}`\n",
             "Nmap version: `7.95`",
             "Scan method: TCP `connect`",
             "Declared TCP ports: 4",
+            "### 1. Port state changed\n\n- **Key:** `192.0.2.10/tcp/3000`\n- **Record:**",
+            "A hash does not prove who made a file, when, or where.",
             "same location, intended targets, and other settings confirmed by user",
             "Total observation differences: **1**",
             "| Port state changed | 1 |",
@@ -110,6 +114,43 @@ class ReportTests(unittest.TestCase):
                 self.assertIn(expected, report)
         self.assertNotIn("**Later evidence:** `closed`", report)
 
+    def test_context_note_is_an_indented_escaped_literal_not_markdown(self):
+        before = read_snapshot(EXAMPLES / "baseline.xml")
+        after = read_snapshot(EXAMPLES / "after.xml")
+        changes = compare_snapshots(before, after, same_context_confirmed=True)
+        note = "users VLAN\n# INJECTED\n``` | ![image](x) <img src=x> \x1b[31m é"
+        report = render_markdown(before, after, changes, context_note=note)
+        self.assertIn(f"{NOTE_LABEL}\n\n    {note!a}\n\n### Earlier snapshot", report)
+        self.assertNotIn("\n# INJECTED", report)
+        self.assertNotIn("\x1b", report)
+        for line in report.splitlines():
+            if "INJECTED" in line:
+                self.assertTrue(line.startswith("    "), line)
+        self.assertNotIn(NOTE_LABEL, render_markdown(before, after, changes))
+
+    def test_grouped_counts_are_host_context_for_missing_ports_only(self):
+        before = read_snapshot(EXAMPLES / "baseline.xml")
+        after = read_snapshot(EXAMPLES / "after.xml")
+        after = replace(
+            after,
+            inventory={**after.inventory, "192.0.2.20": {}},
+            grouped_ports={**after.grouped_ports, "192.0.2.20": {"filtered": 1, "closed": 3}},
+        )
+        report = render_markdown(
+            before, after, compare_snapshots(before, after, same_context_confirmed=True)
+        )
+        self.assertIn(
+            "- **Grouped records on this host:** Earlier 3 grouped as `closed`; Later 3 grouped "
+            "as `closed`; 1 grouped as `filtered`. Watchpost does not expand grouped counts, so "
+            "they are not evidence for this port.",
+            report,
+        )
+        self.assertEqual(report.count("**Grouped records on this host:**"), 1)
+        self.assertIn("| Port not observed later | 1 |", report)
+        self.assertIn("**Later evidence:** `not observed`", report)
+        self.assertNotIn("**Later evidence:** `closed`", report)
+        self.assertIn("Grouped port counts are shown as host context.", report)
+
     def test_address_and_port_counts_are_separate_observations(self):
         report = self.report_for({"192.0.2.100": {22: "open"}}, {"192.0.2.3": {80: "open"}})
         self.assertIn("Total observation differences: **4**", report)
@@ -124,6 +165,8 @@ class ReportTests(unittest.TestCase):
         self.assertIn("not as distinct incidents or devices", report)
         self.assertIn("does not prove a device", report)
         self.assertLess(report.index("IPv4 `192.0.2.3`"), report.index("IPv4 `192.0.2.100`"))
+        for key in ("192.0.2.3", "192.0.2.3/tcp/80", "192.0.2.100", "192.0.2.100/tcp/22"):
+            self.assertIn(f"- **Key:** `{key}`\n", report)
 
     def test_explicit_closed_and_uncertain_states_retain_their_meaning(self):
         for state in ("closed", "filtered", "unfiltered", "open|filtered", "closed|filtered"):
@@ -226,6 +269,23 @@ class ReportCommandTests(unittest.TestCase):
             self.assertEqual(output.read_bytes(), (EXAMPLES / "report.md").read_bytes())
             self.assertNotIn(b"\r", output.read_bytes())
             self.assertEqual(list(Path(directory).iterdir()), [output])
+
+    def test_context_note_reaches_the_saved_report(self):
+        args = [
+            "compare",
+            str(EXAMPLES / "baseline.xml"),
+            str(EXAMPLES / "after.xml"),
+            "--confirm-same-context",
+            "--output",
+            str(self.output),
+            "--context-note",
+            "users VLAN",
+        ]
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(main(args), 0)
+        self.assertIn(
+            f"{NOTE_LABEL}\n\n    'users VLAN'\n", self.output.read_text(encoding="utf-8")
+        )
 
     def test_confirmation_and_bad_inputs_fail_before_creating_reports(self):
         code, stdout, stderr = self.run_report(confirmed=False)

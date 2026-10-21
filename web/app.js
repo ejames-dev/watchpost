@@ -44,6 +44,7 @@ for (const drop of form.querySelectorAll(".drop")) {
   });
 }
 form.confirmed.addEventListener("change", refresh);
+form.note.addEventListener("input", () => (result.hidden = error.hidden = true));
 
 // Read at most one byte past the limit so Python reports the size error, not the browser.
 async function bytesOf(file) {
@@ -63,6 +64,7 @@ form.addEventListener("submit", async (event) => {
       files.before.name,
       files.after.name,
       form.confirmed.checked,
+      form.note.value,
     );
   } catch (reason) {
     outcome = { ok: false, text: `Unexpected error: ${reason?.message ?? reason}` };
