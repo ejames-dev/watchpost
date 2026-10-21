@@ -17,10 +17,11 @@ The [changelog](../CHANGELOG.md) lists everything in `0.0.2`. In short:
 - Platform honesty: Windows CI, LF checkouts, and documented Windows differences.
 - The browser page: in-memory comparison and inspection, synthetic examples, and offline use.
 
-The [v0.1 brief](brief-v0.1.md)'s non-negotiable rules still hold. Watchpost does not scan or
-make runtime network calls. Missing observations never become closures, and port numbers never
-identify applications. Context is confirmed by a human, and existing reports are never
-overwritten. New review features follow the [expectations milestone](expectations-milestone.md).
+The [v0.1 brief](brief-v0.1.md)'s non-negotiable rules still hold. Watchpost never scans, and the
+CLI makes no network calls. The browser page loads only its own files from the site that serves
+it, and scan files never leave the tab. Missing observations never become closures, and port
+numbers never identify applications. Context is confirmed by a human, and existing reports are
+never overwritten. New review features follow the [expectations milestone](expectations-milestone.md).
 
 ## Verification commands
 
@@ -56,9 +57,9 @@ Results for `0.0.2` on 2026-10-21:
 
 | Check | Result |
 |---|---|
-| Unittest suite | 99 tests passed on Python 3.11, 3.12, and 3.13 (Linux) |
-| Pytest | 99 tests and 205 subtests passed |
-| Windows | 99 tests passed, 3 skipped for Linux-only behavior (local Windows 11, Python 3.11) |
+| Unittest suite | 100 tests passed on Python 3.11, 3.12, and 3.13 (Linux) |
+| Pytest | 100 tests and 205 subtests passed |
+| Windows | 100 tests ran on Windows 11 with Python 3.11: 97 passed, and 3 Linux-only tests were skipped |
 | Ruff format and lint | Passed |
 | Source archive and wheel | Built as `0.0.2`; `twine check --strict` passed for both |
 | Archive contents | Required docs, examples, tests, license, changelog, and lockfile present; no `scans/`, `reports/`, `.venv`, `site`, or `.env` entries |
@@ -66,7 +67,7 @@ Results for `0.0.2` on 2026-10-21:
 | Installed wheel outside checkout | Help, installed version, inspect, compare, report, verify, history, and JSON passed; the incomplete scan exited 2 and an existing notes file was preserved |
 | Package consistency | `uv pip check` passed for the installed wheel environment |
 | Browser build | Node smoke test passed; offline reload, examples, comparison, and inspection checked in a browser |
-| Parser robustness | 20,000 mutated inputs through three entry points raised only `ValueError` refusals |
+| Parser robustness | 20,000 mutated inputs through three entry points raised only `ValueError` refusals; parsing time stays linear in the number of root children |
 | Dependency advisory check | `pip-audit` found no known vulnerabilities in the locked dependencies |
 
 The advisory check sent package names and versions to the PyPI service, not scan data.

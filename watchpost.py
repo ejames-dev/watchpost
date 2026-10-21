@@ -164,6 +164,7 @@ def _parse_stream(source: BinaryIO) -> Document:
     reader = _HashingReader(source)
     records: Records = ({}, {}, {}, {})
     root: Element | None = None
+    kept: list[Element] = []
     host_error: ValueError | None = None
     depth = 0
     for event, element in _xml_events(reader):
@@ -180,11 +181,14 @@ def _parse_stream(source: BinaryIO) -> Document:
                 _add_host(element, records)
             except ValueError as exc:
                 host_error = exc
-        if element.tag not in ("scaninfo", "runstats"):
-            root.remove(element)
+        if element.tag in ("scaninfo", "runstats"):
+            kept.append(element)
+        # Emptying the root each time keeps this constant-time, however many children came before.
+        del root[:]
 
     if root is None or root.tag != "nmaprun" or root.get("scanner") != "nmap":
         raise ValueError("Expected an Nmap XML export with an nmaprun root.")
+    root.extend(kept)
     finished = root.findall("runstats/finished")
     if len(finished) != 1 or finished[0].get("exit") != "success":
         raise ValueError("Scan is not confirmed complete. Use a successfully finished Nmap export.")

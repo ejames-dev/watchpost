@@ -5,6 +5,7 @@ import io
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -167,6 +168,19 @@ class InventoryTests(unittest.TestCase):
             snapshot = read_snapshot(path)
         self.assertEqual(snapshot.inventory, read_inventory(EXAMPLE))
         self.assertEqual(snapshot.sha256, hashlib.sha256(data).hexdigest())
+
+    def test_many_root_children_parse_in_linear_time(self):
+        # Quadratic removal took about 17 s here; linear parsing takes well under a second.
+        count = 50_000
+        scaninfo = b'<scaninfo type="connect" protocol="tcp" numservices="4" services="22"/>'
+        xml = EXAMPLE.read_bytes().replace(
+            b"<host ", scaninfo * count + b"<hosthint/>" * count + b"<host ", 1
+        )
+        started = time.perf_counter()
+        root, (inventory, *_), _ = _parse_bytes(xml)
+        self.assertLess(time.perf_counter() - started, 5)
+        self.assertEqual(len(root.findall("scaninfo")), count + 1)
+        self.assertEqual(inventory, read_inventory(EXAMPLE))
 
     def test_parsed_document_keeps_metadata_but_not_host_elements(self):
         xml = EXAMPLE.read_bytes().replace(
