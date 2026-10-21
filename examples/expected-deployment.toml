@@ -1,0 +1,14 @@
+# Synthetic expectations for scenario 1 (expected deployment). Fictional lab plan.
+# These are a reviewer's own statements about the later snapshot, not scan evidence.
+
+[expect."192.0.2.10/tcp/22"]
+state = "open"
+label = "SSH for lab administrators"
+
+[expect."192.0.2.10/tcp/3000"]
+state = "open"
+label = "Demo app approved in the lab deployment plan"
+
+[expect."192.0.2.20/tcp/3000"]
+state = ["closed", "filtered"]
+label = "No demo app on the second host"

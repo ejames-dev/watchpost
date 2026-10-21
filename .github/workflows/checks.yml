@@ -40,6 +40,13 @@ jobs:
           uv run --offline watchpost compare examples/baseline.xml examples/after.xml \
             --confirm-same-context --output "$output_dir/report.md"
           diff -u examples/report.md "$output_dir/report.md"
+          uv run --offline watchpost verify examples/report.md examples/baseline.xml examples/after.xml
+          uv run --offline watchpost compare examples/baseline.xml examples/after.xml \
+            --confirm-same-context --expect examples/expected-deployment.toml
+          uv run --offline watchpost compare examples/baseline.xml examples/after.xml \
+            --confirm-same-context --format json | python -m json.tool > /dev/null
+          uv run --offline watchpost history examples/baseline.xml examples/after.xml \
+            examples/rollback.xml --confirm-same-context
       - name: Build and smoke-test the installed wheel
         run: |
           uv build --out-dir "$RUNNER_TEMP/watchpost-dist"

@@ -172,6 +172,7 @@ Each report includes:
   Nmap's recorded reasons, and the host status recorded in each snapshot.
 - Grouped port counts beside findings for ports without an explicit record, labeled as context.
 - Fixed-rule explanations and suggested checks. No AI verdicts or vulnerability scores.
+- With `--expect`, your own expected later states and whether each explicit record matches.
 - Evidence limitations and blank fields for investigation notes and conclusions.
 
 **Existing files and notes are never overwritten.** If `reports/review.md` exists, choose a
@@ -205,6 +206,62 @@ Keep notes inside those fields.
 Exit code 0 means the evidence matches. Exit code 1 lists the lines that differ. Exit code 2 means an
 input could not be used, for example because the snapshots are given in the wrong order.
 A matching hash identifies the exact files. It does not prove who created them, when, or where.
+
+## Record your expectations
+
+Write your own expected later port states in a TOML file:
+
+```toml
+[expect."192.0.2.10/tcp/3000"]
+state = "open"
+label = "Demo app approved in the lab deployment plan"
+
+[expect."192.0.2.20/tcp/3000"]
+state = ["closed", "filtered"]
+```
+
+Then pass it to `compare`:
+
+```bash
+uv run --offline watchpost compare examples/baseline.xml examples/after.xml \
+  --confirm-same-context --expect examples/expected-deployment.toml
+```
+
+Each expectation is checked against the later snapshot's explicit record. The result is
+`matches`, `differs`, or `cannot be checked` when there is no explicit later record or the later
+scan did not cover the port. Absence never matches `closed`, and grouped counts never count as a
+record. Expectations and labels are your own statements: a match is not a safety verdict, and a
+difference is not proof of a problem.
+
+Reports add a "Your expectations" section with the file's SHA-256 hash, and `verify` needs the
+same file through `--expect`. See the [expectations milestone](docs/expectations-milestone.md).
+
+## Follow a series of snapshots
+
+```bash
+uv run --offline watchpost history examples/baseline.xml examples/after.xml \
+  examples/rollback.xml --confirm-same-context
+```
+
+```text
+192.0.2.10/tcp/3000: closed (conn-refused) -> open (syn-ack) -> closed (conn-refused)
+```
+
+`history` takes 2 to 50 saved snapshots, earliest first, and checks every consecutive pair with
+the same rules as `compare`. A refusal names the pair. It prints one timeline for each record
+whose explicit observations differ anywhere in the series, with `not observed` wherever a snapshot
+has no record. There is no scheduling or database: you supply files you already saved.
+
+## JSON output
+
+Add `--format json` to `compare` to print the same evidence as JSON, or save it with `--output`.
+Saved files follow the same never-overwrite rule as reports.
+
+Each finding has its key, category, address, port, and both sides' records with reasons, host
+status, and grouped counts, plus the fixed explanation and suggested check. A side without an
+explicit record has `"record": "not observed"`, never `null`, so scripts cannot mistake absence
+for a closed port. The document also carries the notice, scan metadata with SHA-256 hashes, your
+context note and expectations, and the limitations.
 
 ## Practice the three scenarios
 
@@ -287,3 +344,5 @@ Beyond the v0.1 brief:
   comparisons, and pre-flight single snapshots with `inspect`.
 - [x] Show grouped counts as host context, record an optional context note, and tie reports to
   their input files with SHA-256 hashes, finding keys, and `watchpost verify`.
+- [x] Check reviewer-written expectations, follow a series of snapshots with `history`, and print
+  or save comparisons as JSON.

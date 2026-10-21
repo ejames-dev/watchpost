@@ -18,3 +18,4 @@ reports/
 !examples/baseline.xml
 !examples/after.xml
 !examples/incomplete.xml
+!examples/rollback.xml
