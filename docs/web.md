@@ -14,6 +14,7 @@ with the File API and passed to Python in memory. Nothing is uploaded.
 - The build verifies the Pyodide tarball against a pinned SHA-512 and installs the
   `defusedxml` wheel with the same SHA-256 as `uv.lock`.
 - Source names in reports are bare filenames from the browser, never local paths.
+- The optional context note is only written into the report, as an escaped literal.
 
 ## Build and test locally
 

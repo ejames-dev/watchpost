@@ -14,6 +14,7 @@ Source path (escaped literal):
 
     'examples/baseline.xml'
 
+- SHA-256: `27ff0fda20d569674344e9fa460133be5dfc46ac33eeafd8e63d331d5f63e656`
 - UTC start: `2026-01-01T00:00:00+00:00`
 - UTC finish: `2026-01-01T00:00:01+00:00`
 - Nmap version: `7.95`
@@ -28,6 +29,7 @@ Source path (escaped literal):
 
     'examples/after.xml'
 
+- SHA-256: `70afb6b8c382f369af1339a2abeff96e6e440dea7c530ef3e10f071e774ad434`
 - UTC start: `2026-01-01T00:01:00+00:00`
 - UTC finish: `2026-01-01T00:01:01+00:00`
 - Nmap version: `7.95`
@@ -58,6 +60,7 @@ Source names below refer to the Earlier and Later snapshot sections above. Port 
 
 ### 1. Port state changed
 
+- **Key:** `192.0.2.10/tcp/3000`
 - **Record:** IPv4 `192.0.2.10`, TCP port `3000` (numeric ID)
 - **Earlier evidence:** `closed`, reason `conn-refused` — Earlier snapshot
 - **Later evidence:** `open`, reason `syn-ack` — Later snapshot
@@ -77,10 +80,11 @@ Source names below refer to the Earlier and Later snapshot sections above. Port 
 - IP addresses are not device identities; port numbers are not application identities.
 - Filtered and uncertain states are preserved, not treated as confirmed open or closed.
 - Host status and reasons are shown as recorded evidence. They are not compared or used to reclassify any record.
-- Hostnames, service names, scripts, and grouped states are not compared.
+- Grouped port counts are shown as host context. They are not compared or expanded into per-port states.
+- Hostnames, service names, and scripts are not compared.
 - These are scan-window observations, not proof of when or why a change happened.
 - User confirmation is not independently verified by Watchpost.
-- Keep the original XML files with this report; references do not embed or authenticate them.
+- Keep the original XML files with this report. The SHA-256 hashes identify them, and `watchpost verify` rechecks the evidence. A hash does not prove who made a file, when, or where.
 - Reports contain network details and are not anonymous. Review before sharing.
 
 ## Human review

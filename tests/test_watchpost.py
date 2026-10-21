@@ -66,6 +66,21 @@ class InventoryTests(unittest.TestCase):
                 baseline.replace("<host starttime", '<host timedout="true" starttime'),
                 "complete",
             ),
+            "grouped state": (
+                baseline.replace('<extraports state="closed"', '<extraports state="hidden"'),
+                "grouped",
+            ),
+            "grouped count": (
+                baseline.replace('state="closed" count="3"', 'state="closed" count="three"'),
+                "grouped",
+            ),
+            "duplicate grouped state": (
+                baseline.replace(
+                    '<extraports state="closed" count="3">',
+                    '<extraports state="closed" count="1"/><extraports state="closed" count="2">',
+                ),
+                "grouped",
+            ),
         }
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "snapshot.xml"
@@ -181,6 +196,7 @@ class CommandTests(unittest.TestCase):
             "  443/tcp  open (syn-ack)\n"
             "  3000/tcp  closed (conn-refused)\n"
             "192.0.2.20  host status: up (user-set)\n"
+            "  3 grouped as closed, not listed individually\n"
             "  22/tcp  open (syn-ack)\n"
             "Only explicit port observations are listed; missing ports are not classified.\n"
             "Host status and reasons are shown as Nmap recorded them, not as verdicts.\n"
@@ -247,7 +263,9 @@ class CommandTests(unittest.TestCase):
             "192.0.2.10  host status: not recorded\n",
             "  22/tcp  open (no reason recorded)\n",
             "  80/tcp  closed (conn-refused)\n",
-            "192.0.2.20  host status: down (no reason recorded)\n  22/tcp  open (syn-ack)\n",
+            "192.0.2.20  host status: down (no reason recorded)\n"
+            "  3 grouped as closed, not listed individually\n"
+            "  22/tcp  open (syn-ack)\n",
         ):
             with self.subTest(expected=expected):
                 self.assertIn(expected, output.getvalue())

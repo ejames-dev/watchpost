@@ -27,6 +27,12 @@ const expected = await readFile(join(root, "examples/report.md"), "utf8");
 const ok = compare(before, after, "examples/baseline.xml", "examples/after.xml", true);
 assert.deepEqual(ok, { ok: true, text: expected }, "browser report must match the CLI report");
 
+const note = "users VLAN\n# not a heading";
+const noted = compare(before, after, "examples/baseline.xml", "examples/after.xml", true, note);
+assert.equal(noted.ok, true);
+assert.ok(noted.text.includes("    'users VLAN\\n# not a heading'"), "note must be an escaped literal");
+assert.ok(!noted.text.includes("\n# not a heading"), "note must not become report structure");
+
 const unconfirmed = compare(before, after, "a.xml", "b.xml", false);
 assert.equal(unconfirmed.ok, false);
 assert.match(unconfirmed.text, /Confirm the same scan location/);

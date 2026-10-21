@@ -57,6 +57,12 @@ class InMemoryTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Unsafe XML"):
             self.report(after=entity)
 
+    def test_context_note_is_optional_and_checked(self):
+        self.assertIn("\n    'lab VLAN'\n", self.report(context_note="lab VLAN"))
+        self.assertEqual(self.report(context_note=None), self.report())
+        with self.assertRaisesRegex(ValueError, "empty"):
+            self.report(context_note=" ")
+
     def test_source_names_are_escaped_labels_only(self):
         report = self.report(before_name="lab\n# injected.xml")
         self.assertIn("    'lab\\n# injected.xml'", report)

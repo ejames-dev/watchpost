@@ -72,6 +72,7 @@ IPv4/TCP observations (not a security verdict)
   443/tcp  open (syn-ack)
   3000/tcp  closed (conn-refused)
 192.0.2.20  host status: up (user-set)
+  3 grouped as closed, not listed individually
   22/tcp  open (syn-ack)
 Only explicit port observations are listed; missing ports are not classified.
 Host status and reasons are shown as Nmap recorded them, not as verdicts.
@@ -112,6 +113,10 @@ Nmap settings.** The flag records your confirmation. It does not let Watchpost v
 network location, reconstruct the full command line, or override failed metadata checks.
 Do not use it to force a comparison you know is incompatible.
 
+To record what you confirmed, add `--context-note "scanner on the users VLAN"` (up to 500
+characters). Watchpost prints and saves the note as an escaped literal. It stays your own
+statement, which Watchpost cannot verify.
+
 Comparison currently requires:
 
 - One TCP connect or SYN scan per snapshot, with the same method and Nmap version.
@@ -136,6 +141,10 @@ Each difference is followed by a `Host status:` line, such as `up (user-set) -> 
 Reasons and host status are copied from the XML as evidence. They never turn a missing record into
 a closure, and a change in them alone is not counted as a difference.
 
+A port observation also gets a `Grouped records:` line with the host's grouped `<extraports>`
+counts in each snapshot, such as `none -> 3 grouped as closed`. Watchpost never expands those
+counts into per-port states, so they are context for the reviewer, not evidence for that port.
+
 A newly observed port is not proof that a service just started. A missing port is not proof of
 closure. Grouped records and uncertain states do not become guessed open/closed results.
 See the [comparison milestone](docs/compare-milestone.md) for boundaries and verification.
@@ -155,10 +164,13 @@ See [the synthetic sample report](examples/report.md) for the expected result.
 
 Each report includes:
 
-- Source paths, UTC scan windows, scan metadata, and user-confirmed assumptions.
+- Source paths, each input file's SHA-256 hash, UTC scan windows, scan metadata, and
+  user-confirmed assumptions, including your context note if you gave one.
 - Separate counts for changed states, newly observed records, and records not observed later.
+- A stable key for each finding, such as `192.0.2.10/tcp/3000`, for referring to it across reports.
 - Each finding's address, numeric TCP port ID where applicable, earlier/later source evidence with
   Nmap's recorded reasons, and the host status recorded in each snapshot.
+- Grouped port counts beside findings for ports without an explicit record, labeled as context.
 - Fixed-rule explanations and suggested checks. No AI verdicts or vulnerability scores.
 - Evidence limitations and blank fields for investigation notes and conclusions.
 
@@ -172,10 +184,27 @@ created by another writer. The output directory must exist and its filesystem mu
 If it does not, the command fails instead of using an unsafe overwrite fallback.
 This workflow targets Linux and Ubuntu WSL. Use a trusted output directory.
 
-Keep the original XML files with your report. Reports reference the supplied files but do not embed
-or authenticate them. Paths appear as escaped literals so filename markup stays plain text.
+Keep the original XML files with your report. Reports record each file's SHA-256 hash but do not
+embed the files. Paths appear as escaped literals so filename markup stays plain text.
 Review real reports before sharing: they contain network details and are not anonymous.
 See [the reporting milestone](docs/reporting-milestone.md) for the safety checks and boundaries.
+
+## Verify a saved report
+
+Check that a report still matches the two snapshots it was made from:
+
+```bash
+uv run --offline watchpost verify reports/review.md examples/baseline.xml examples/after.xml
+```
+
+`verify` regenerates the report from the snapshots and compares every generated line: the SHA-256
+hashes, scan metadata, counts, findings, and fixed wording. It skips the source path labels, the
+context note, and the review fields, so a report still verifies after you fill in your notes.
+Keep notes inside those fields.
+
+Exit code 0 means the evidence matches. Exit code 1 lists the lines that differ. Exit code 2 means an
+input could not be used, for example because the snapshots are given in the wrong order.
+A matching hash identifies the exact files. It does not prove who created them, when, or where.
 
 ## Practice the three scenarios
 
@@ -193,21 +222,22 @@ The walkthroughs supply fictional context and clearly labeled example review not
 1. Read the selected local file and reject inputs larger than 10 MiB.
 2. Parse XML with entity expansion and external entities disabled.
 3. Check the Nmap root, completion marker, TCP scan metadata, and explicit IPv4/TCP records.
-4. Print addresses and ports in numerical order, with recorded host status and reasons.
+4. Print addresses and ports in numerical order, with recorded host status, reasons, and
+   grouped counts.
 5. Run the comparison checks that need only this file, and print the result as a pre-flight.
 
 The command rejects malformed XML, unsupported encodings, failed scans, reported host timeouts,
-UDP/IPv6 data, invalid addresses or ports, duplicate observations, and malformed host status or
-reason values. Errors exit with code 2, without partial inventory output.
+UDP/IPv6 data, invalid addresses or ports, duplicate observations, and malformed host status,
+reason, or grouped records. Errors exit with code 2, without partial inventory output.
 
-Only explicit `<port>` records are listed. This milestone does not expand grouped
-`<extraports>` records, even when additional metadata is present. Hostnames, service names,
+Only explicit `<port>` records are listed individually. Grouped `<extraports>` records appear only
+as counts per state, even when additional metadata names their ports. Hostnames, service names,
 script output, and other free-text scan fields are not printed. Host status and reasons are
 printed only as simple Nmap tokens, such as `up` or `syn-ack`.
 
 This is not full Nmap schema validation. The pre-flight covers single-file metadata; `compare`
-adds the checks that need both files and your confirmation. Host status is shown but not
-compared. Service names, script output, and grouped states are not compared. Matching metadata
+adds the checks that need both files and your confirmation. Host status and grouped counts are
+shown but not compared. Service names and script output are not compared. Matching metadata
 does not prove identical scan conditions, and no-change output is not a safety verdict.
 
 ## Development
@@ -255,3 +285,5 @@ Beyond the v0.1 brief:
   or cloud service; the hosted page needs only the static site that serves it.
 - [x] Show recorded host status and reasons as evidence, name the values behind refused
   comparisons, and pre-flight single snapshots with `inspect`.
+- [x] Show grouped counts as host context, record an optional context note, and tie reports to
+  their input files with SHA-256 hashes, finding keys, and `watchpost verify`.

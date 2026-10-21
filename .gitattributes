@@ -1,0 +1,2 @@
+# Keep the bundled examples byte-identical on every platform: reports record their SHA-256.
+examples/** -text
