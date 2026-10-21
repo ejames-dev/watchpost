@@ -52,6 +52,7 @@
 
       <div class="actions">
         <button type="submit" disabled>Compare</button>
+        <button type="button" id="examples" class="secondary">Try the synthetic examples</button>
         <p id="status" role="status" aria-live="polite">Loading the Python runtime…</p>
       </div>
     </form>
@@ -72,11 +73,34 @@
       <p id="error-text"></p>
     </section>
 
+    <section id="inspect-section">
+      <h2>Inspect one scan</h2>
+      <p class="hint">
+        List the explicit records in one saved scan and check whether it is ready to compare.
+      </p>
+      <form id="inspect" novalidate>
+        <label class="drop" data-slot="single">
+          <span class="drop-title">Scan to inspect</span>
+          <span class="drop-file" data-empty="Choose or drop an Nmap XML export">Choose or drop an Nmap XML export</span>
+          <input type="file" name="single" accept=".xml,application/xml,text/xml">
+        </label>
+        <div class="actions">
+          <button type="submit" disabled>Inspect</button>
+        </div>
+      </form>
+      <pre id="inspection" class="output" hidden tabindex="0"></pre>
+      <section id="inspect-error" class="refusal" hidden role="alert">
+        <h2>Inspection refused</h2>
+        <p id="inspect-error-text"></p>
+      </section>
+    </section>
+
     <footer>
       <p>
         <strong>How this stays local:</strong> Watchpost's Python code runs in WebAssembly via
         Pyodide, served from this site. There is no upload endpoint, and the page's content
-        security policy blocks sending data to any other site.
+        security policy blocks sending data to any other site. After your first visit, the page
+        keeps a copy of its own files and also works offline.
       </p>
       <p>
         Observations, not a security verdict. Only compare scans of networks you are authorized

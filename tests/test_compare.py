@@ -2,6 +2,7 @@
 
 import hashlib
 import io
+import os
 import re
 import subprocess
 import sys
@@ -432,8 +433,9 @@ class SnapshotTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stderr, "")
-        self.assertIn("Earlier: 'examples/baseline.xml'", result.stdout)
-        self.assertIn("Later: 'examples/after.xml'", result.stdout)
+        # Paths are shown as the platform spells them, so Windows uses backslashes.
+        self.assertIn(f"Earlier: {str(Path('examples/baseline.xml'))!a}", result.stdout)
+        self.assertIn(f"Later: {str(Path('examples/after.xml'))!a}", result.stdout)
         self.assertIn("2026-01-01T00:00:00+00:00", result.stdout)
         self.assertIn("2026-01-01T00:01:01+00:00", result.stdout)
         self.assertIn("confirmed by user", result.stdout)
@@ -472,6 +474,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertIn("methods differ", stderr.getvalue())
         self.assertNotIn("Traceback", stderr.getvalue())
 
+    @unittest.skipUnless(os.name == "posix", "Windows filenames cannot contain control characters.")
     def test_comparison_output_is_repeatable_offline_and_escapes_source_names(self):
         path = self.path.with_name("later\n\x1b[31m.xml")
         path.write_text(self.later_xml, encoding="utf-8")

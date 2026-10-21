@@ -1,5 +1,6 @@
 """Offline behavior tests using synthetic scan data only."""
 
+import hashlib
 import io
 import subprocess
 import sys
@@ -9,7 +10,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from watchpost import MAX_XML_BYTES, main, read_inventory
+from watchpost import MAX_XML_BYTES, _parse_bytes, main, read_inventory, read_snapshot
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "baseline.xml"
 
@@ -153,8 +154,27 @@ class InventoryTests(unittest.TestCase):
             self.assertEqual(read_inventory(path), read_inventory(EXAMPLE))
             with path.open("ab") as source:
                 source.write(b" ")
-            with self.assertRaisesRegex(ValueError, "10 MiB"):
+            with self.assertRaisesRegex(ValueError, "100 MiB limit"):
                 read_inventory(path)
+
+    def test_streams_snapshots_past_the_old_10_mib_limit(self):
+        data = EXAMPLE.read_bytes().replace(
+            b"</nmaprun>", b"<!--" + b"x" * (11 * 1024 * 1024) + b"-->\n</nmaprun>"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "large.xml"
+            path.write_bytes(data)
+            snapshot = read_snapshot(path)
+        self.assertEqual(snapshot.inventory, read_inventory(EXAMPLE))
+        self.assertEqual(snapshot.sha256, hashlib.sha256(data).hexdigest())
+
+    def test_parsed_document_keeps_metadata_but_not_host_elements(self):
+        xml = EXAMPLE.read_bytes().replace(
+            b"<host ", b'<hosthint><status state="up"/></hosthint><host ', 1
+        )
+        root, (inventory, *_), _ = _parse_bytes(xml)
+        self.assertEqual([child.tag for child in root], ["scaninfo", "runstats"])
+        self.assertEqual(inventory, read_inventory(EXAMPLE))
 
     def test_rejects_missing_files_and_directories(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -203,8 +223,8 @@ class CommandTests(unittest.TestCase):
             "Comparison pre-flight (this file only):\n"
             "  UTC window: 2026-01-01T00:00:00+00:00 -> 2026-01-01T00:00:01+00:00\n"
             "  Scan: TCP connect; Nmap 7.95; 4 declared ports: 22, 80, 443, 3000\n"
-            "  Ready to compare: yes. compare also checks the other file and requires "
-            "--confirm-same-context.\n",
+            "  Ready to compare: yes. Comparing still checks the other file and needs you "
+            "to confirm the scan context.\n",
         )
 
     def test_inspect_preflight_names_comparison_problems_without_failing(self):

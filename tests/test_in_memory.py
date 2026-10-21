@@ -1,10 +1,19 @@
 """In-memory comparison checks for the browser build, using synthetic inputs only."""
 
+import io
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
-from watchpost import MAX_XML_BYTES, compare_report, parse_snapshot, read_snapshot
+from watchpost import (
+    MAX_XML_BYTES,
+    compare_report,
+    inspect_text,
+    main,
+    parse_snapshot,
+    read_snapshot,
+)
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -37,7 +46,7 @@ class InMemoryTests(unittest.TestCase):
 
     def test_requires_confirmation_before_parsing(self):
         with (
-            patch("watchpost._parse_root") as parse,
+            patch("watchpost._parse_bytes") as parse,
             self.assertRaisesRegex(ValueError, "Confirm the same scan location"),
         ):
             self.report(same_context_confirmed=False)
@@ -51,11 +60,19 @@ class InMemoryTests(unittest.TestCase):
             self.report(before=self.after, after=self.before)
 
     def test_rejects_oversized_and_unsafe_input(self):
-        with self.assertRaisesRegex(ValueError, "10 MiB limit"):
+        with self.assertRaisesRegex(ValueError, "100 MiB limit"):
             self.report(after=b" " * (MAX_XML_BYTES + 1))
         entity = b'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "b">]><nmaprun>&a;</nmaprun>'
         with self.assertRaisesRegex(ValueError, "Unsafe XML"):
             self.report(after=entity)
+
+    def test_inspect_text_matches_the_cli_inspection(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.assertEqual(main(["inspect", str(EXAMPLES / "baseline.xml")]), 0)
+        self.assertEqual(inspect_text(self.before, name="baseline.xml") + "\n", output.getvalue())
+        with self.assertRaisesRegex(ValueError, "incomplete"):
+            inspect_text((EXAMPLES / "incomplete.xml").read_bytes(), name="incomplete.xml")
 
     def test_context_note_is_optional_and_checked(self):
         self.assertIn("\n    'lab VLAN'\n", self.report(context_note="lab VLAN"))

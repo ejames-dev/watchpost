@@ -21,16 +21,17 @@ See [publishing setup](docs/publishing.md) for the maintainer workflow.
 
 ## Install from PyPI
 
-Version `0.0.1` is published on [PyPI](https://pypi.org/project/watchpost-cli/0.0.1/).
-With Python 3.11+, install it into a virtual environment:
+Published versions are listed on [PyPI](https://pypi.org/project/watchpost-cli/).
+With Python 3.11+, install the latest one into a virtual environment:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install 'watchpost-cli==0.0.1'
+.venv/bin/python -m pip install watchpost-cli
 .venv/bin/watchpost --help
 ```
 
-The package does not include the synthetic example files.
+A source checkout can include changes that are not published yet; see the
+[changelog](CHANGELOG.md). The package does not include the synthetic example files.
 To run the demos below, use a source checkout.
 
 ## Browser version
@@ -38,9 +39,10 @@ To run the demos below, use a source checkout.
 **Try it: <https://getwatchpost.dev>**
 No install needed. Use only scans of networks you are authorized to assess.
 
-`web/` builds a static page that runs the same comparison in the browser with
+`web/` builds a static page that runs the same comparison and inspection in the browser with
 [Pyodide](https://pyodide.org/). Scan files stay in the browser tab: everything is served
 from one origin, and a content security policy blocks requests to other sites.
+The page can load the synthetic examples, and after the first visit it also works offline.
 It deploys to Cloudflare as an assets-only Worker. See [the browser build guide](docs/web.md).
 
 ## Scope
@@ -79,7 +81,7 @@ Host status and reasons are shown as Nmap recorded them, not as verdicts.
 Comparison pre-flight (this file only):
   UTC window: 2026-01-01T00:00:00+00:00 -> 2026-01-01T00:00:01+00:00
   Scan: TCP connect; Nmap 7.95; 4 declared ports: 22, 80, 443, 3000
-  Ready to compare: yes. compare also checks the other file and requires --confirm-same-context.
+  Ready to compare: yes. Comparing still checks the other file and needs you to confirm the scan context.
 ```
 
 Nmap is not required. These addresses and states are fictional.
@@ -183,7 +185,20 @@ Validation finishes before any report is created. Watchpost writes a private tem
 then publishes the complete report with a non-replacing hard link. This also protects a destination
 created by another writer. The output directory must exist and its filesystem must support hard links.
 If it does not, the command fails instead of using an unsafe overwrite fallback.
-This workflow targets Linux and Ubuntu WSL. Use a trusted output directory.
+Use a trusted output directory.
+
+### Platforms
+
+Linux and Ubuntu WSL are the main targets. Native Windows also runs the full test suite in CI,
+with two differences:
+
+- Watchpost makes saved reports readable only by your account (mode `0600`) on Linux and WSL.
+  Windows ignores that mode, so the output folder's permissions decide who can read a report.
+  For private reports on Windows, save them in a folder only you can open, or use WSL.
+- Paths appear as Windows spells them, such as `'examples\\baseline.xml'`. The rest of a report
+  is byte-for-byte the same on every platform.
+
+The repository checks out text files with LF line endings on every platform.
 
 Keep the original XML files with your report. Reports record each file's SHA-256 hash but do not
 embed the files. Paths appear as escaped literals so filename markup stays plain text.
@@ -276,8 +291,10 @@ The walkthroughs supply fictional context and clearly labeled example review not
 
 ## How inspection works
 
-1. Read the selected local file and reject inputs larger than 10 MiB.
-2. Parse XML with entity expansion and external entities disabled.
+1. Read the selected local file and reject inputs larger than 100 MiB.
+2. Parse XML in one streaming pass with entity expansion and external entities disabled.
+   Each host's elements are dropped once its records are read, so memory follows the number of
+   explicit records rather than the size of the file.
 3. Check the Nmap root, completion marker, TCP scan metadata, and explicit IPv4/TCP records.
 4. Print addresses and ports in numerical order, with recorded host status, reasons, and
    grouped counts.
