@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+Not yet published. With the project owner's approval, this changes one rule of the
+[v0.1 project brief](docs/brief-v0.1.md): Watchpost can now run one fixed Nmap profile when asked.
+See [the scan milestone](docs/scan-milestone.md).
+
+### Added
+
+- `watchpost scan TARGET... --ports PORTS --confirm-authorized` runs Nmap once with a fixed TCP
+  connect profile (`-sT -Pn --disable-arp-ping -n --no-stylesheet`) against explicit IPv4
+  addresses or networks, at most 256 addresses. It saves the XML as a new file in `scans/` or
+  `--output-dir`, never overwriting, then pre-flights it and checks that it records the requested
+  ports and every listed address. It never runs on its own; schedule it with your own tools.
+- `compare --exit-code` exits 1 when the snapshots differ in explicit records, for scripts and
+  scheduled runs. It still requires `--confirm-same-context`.
+
+### Changed
+
+- `scan` is the only command that starts a process or causes network traffic. `inspect`,
+  `compare`, `history`, `verify`, and the browser page stay offline.
+- Exit code 2 also covers a scan that failed or cannot be compared.
+
 ## 0.0.2
 
 Second version: richer evidence, review tools, and the browser build, all within the

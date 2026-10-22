@@ -4,11 +4,12 @@ import argparse
 import hashlib
 import io
 import re
+import shlex
 import tomllib
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from ipaddress import IPv4Address
+from ipaddress import IPv4Address, IPv4Network
 from itertools import groupby, pairwise, zip_longest
 from pathlib import Path, PurePath, PurePosixPath
 from typing import BinaryIO
@@ -299,12 +300,18 @@ def _port_coverage(services: str) -> frozenset[int]:
     return frozenset(ports)
 
 
-def _port_ranges(ports: Iterable[int], limit: int = 10) -> str:
-    """Name ports as numeric ranges such as 22, 80, 443-445, listing at most `limit` ranges."""
+def _range_list(ports: Iterable[int]) -> list[str]:
+    """Name ports as ascending numeric ranges, such as ["22", "80", "443-445"]."""
     ranges = []
     for _, run in groupby(enumerate(sorted(ports)), key=lambda item: item[1] - item[0]):
         numbers = [number for _, number in run]
         ranges.append(str(numbers[0]) if len(numbers) == 1 else f"{numbers[0]}-{numbers[-1]}")
+    return ranges
+
+
+def _port_ranges(ports: Iterable[int], limit: int = 10) -> str:
+    """Name ports as numeric ranges such as 22, 80, 443-445, listing at most `limit` ranges."""
+    ranges = _range_list(ports)
     hidden = len(ranges) - limit
     if hidden > 0:
         return ", ".join(ranges[:limit]) + f", and {hidden} more range{'s' if hidden > 1 else ''}"
@@ -824,6 +831,8 @@ def _run_compare(args: argparse.Namespace) -> int:
     expectations = None if args.expect is None else read_expectations(args.expect)
     before, after = read_snapshot(args.before), read_snapshot(args.after)
     changes = compare_snapshots(before, after, same_context_confirmed=args.confirm_same_context)
+    # Opt-in for scripts. The comparison above has already required the user's confirmation.
+    status = 1 if args.exit_code and changes else 0
     options = {"context_note": note, "expectations": expectations}
     if args.format == "json":
         content = render_json(before, after, changes, **options)
@@ -831,20 +840,90 @@ def _run_compare(args: argparse.Namespace) -> int:
         content = render_markdown(before, after, changes, **options)
     else:
         print(_format_comparison(before, after, changes, note, expectations))
-        return 0
+        return status
     if args.output is None:
         print(content, end="")
     else:
         write_report(args.output, content)
         print(f"Report saved to {str(args.output)!a}")
+    return status
+
+
+def _format_scan(path: Path, snapshot: Snapshot) -> str:
+    return "\n".join(
+        [
+            f"Scan saved to {str(path)!a}",
+            f"  SHA-256: {snapshot.sha256}",
+            f"  UTC window: {_window(snapshot)}",
+            f"  Scan: TCP {snapshot.method}; Nmap {snapshot.version}; "
+            f"{len(snapshot.coverage)} declared ports: {_port_ranges(snapshot.coverage)}",
+            f"  IPv4 addresses with records: {len(snapshot.inventory)}",
+            "  Ready to compare: yes. Comparing still checks the other file and needs you "
+            "to confirm the scan context.",
+            "Every listed address is recorded as up (user-set) because Nmap was told to scan it.",
+            "That status is not evidence that a device answered.",
+        ]
+    )
+
+
+def _run_scan(args: argparse.Namespace) -> int:
+    # Imported here so the offline commands and the browser build never load the scan module.
+    from watchpost_scan import check_destination, find_nmap, nmap_command, run_scan, scan_targets
+
+    targets = scan_targets(args.targets)
+    try:
+        ports = _port_coverage(args.ports)
+    except ValueError as exc:
+        raise ValueError(
+            "--ports must list TCP ports or ranges from 0 to 65535 without repeats, "
+            "such as 22,80,443-445."
+        ) from exc
+    command = nmap_command(find_nmap(args.nmap), targets, _range_list(ports))
+    destination = args.output_dir / f"scan-{datetime.now(UTC):%Y%m%dT%H%M%SZ}.xml"
+    check_destination(destination)
+    print(f"Running: {_printable(shlex.join(command))}", flush=True)
+    run_scan(command, destination)
+    try:
+        snapshot = read_snapshot(destination)
+    except ValueError as exc:
+        raise ValueError(
+            f"Scan saved to {str(destination)!a}, but it is not ready to compare. {exc}"
+        ) from exc
+    # The file is kept either way; a mismatch means it does not record the scan that was asked for.
+    problems = []
+    if snapshot.method != "connect":
+        problems.append(f"scan type {snapshot.method}, not connect")
+    if snapshot.coverage != ports:
+        problems.append(
+            f"declared ports {_port_ranges(snapshot.coverage)}, not {_port_ranges(ports)}"
+        )
+    # Without host discovery, Nmap records every listed address, including network addresses.
+    listed = {str(address) for target in targets for address in IPv4Network(target)}
+    unlisted = sorted(snapshot.inventory.keys() - listed, key=IPv4Address)
+    if unlisted:
+        problems.append(f"records for unlisted addresses, such as {unlisted[0]}")
+    missing = sorted(listed - snapshot.inventory.keys(), key=IPv4Address)
+    if missing:
+        problems.append(f"no records for listed addresses, such as {missing[0]}")
+    if problems:
+        raise ValueError(
+            f"Scan saved to {str(destination)!a}, but it does not match the request: "
+            f"{'; '.join(problems)}."
+        )
+    print(_format_scan(destination, snapshot))
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="watchpost",
-        description="Inspect and compare saved Nmap XML locally. No scans or network requests.",
-        epilog="Exit codes: 0 success; 1 verify found differences; 2 invalid input or refusal.",
+        description=(
+            "Inspect and compare saved Nmap XML offline. Only the opt-in scan command runs Nmap."
+        ),
+        epilog=(
+            "Exit codes: 0 success; 1 differences found by verify, or by compare --exit-code; "
+            "2 invalid input, refusal, or a failed scan."
+        ),
     )
     commands = parser.add_subparsers(dest="command", required=True)
     inspect = commands.add_parser(
@@ -880,6 +959,11 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE",
         help="TOML file of your own expected later port states, compared with explicit records.",
     )
+    compare.add_argument(
+        "--exit-code",
+        action="store_true",
+        help="Exit 1 when the snapshots differ in explicit records. Confirmation is still needed.",
+    )
     history = commands.add_parser(
         "history", help="Follow explicit observations across a series of saved scans."
     )
@@ -901,8 +985,44 @@ def main(argv: list[str] | None = None) -> int:
     verify.add_argument(
         "--expect", type=Path, metavar="FILE", help="The expectations file the report used."
     )
+    scan = commands.add_parser(
+        "scan",
+        help="Opt-in: run Nmap once with a fixed TCP connect profile and save its XML.",
+        description=(
+            "Run Nmap once with a fixed profile (-sT -Pn --disable-arp-ping -n --no-stylesheet) "
+            "against the IPv4 targets you list, and save its XML as a new file. Watchpost never "
+            "schedules or repeats scans. Only scan networks you are authorized to assess."
+        ),
+    )
+    scan.add_argument(
+        "targets",
+        nargs="+",
+        metavar="TARGET",
+        help="IPv4 address or network, such as 192.0.2.10 or 192.0.2.0/28. No hostnames.",
+    )
+    scan.add_argument(
+        "--ports", required=True, help="TCP ports and ranges to scan, such as 22,80,443-445."
+    )
+    scan.add_argument(
+        "--confirm-authorized",
+        action="store_true",
+        required=True,
+        help="Confirm you are authorized to scan every listed target.",
+    )
+    scan.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path("scans"),
+        metavar="DIR",
+        help="Existing directory for the new XML file (default: scans). Never overwrites.",
+    )
+    scan.add_argument(
+        "--nmap", default="nmap", metavar="PATH", help="Nmap executable (default: nmap on PATH)."
+    )
     args = parser.parse_args(argv)
     try:
+        if args.command == "scan":
+            return _run_scan(args)
         if args.command == "verify":
             problems = verify_report(args.report, args.before, args.after, args.expect)
             print(_format_verification(problems))

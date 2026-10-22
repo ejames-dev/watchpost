@@ -72,3 +72,8 @@ automatic fixes, UDP, and IPv6.
 5. Document an offline demo and limitations before publishing.
 
 Comparison and Markdown reporting follow this milestone.
+
+## Later scope change
+
+After 0.0.2, the project owner approved an opt-in `watchpost scan` command and
+`compare --exit-code`. See [the scan milestone](scan-milestone.md). The rest of this brief applies.

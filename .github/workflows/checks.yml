@@ -45,6 +45,10 @@ jobs:
             --confirm-same-context --expect examples/expected-deployment.toml
           uv run --offline watchpost compare examples/baseline.xml examples/after.xml \
             --confirm-same-context --format json | python -m json.tool > /dev/null
+          status=0
+          uv run --offline watchpost compare examples/baseline.xml examples/after.xml \
+            --confirm-same-context --exit-code > /dev/null || status=$?
+          test "$status" -eq 1
           uv run --offline watchpost history examples/baseline.xml examples/after.xml \
             examples/rollback.xml --confirm-same-context
       - name: Build and smoke-test the installed wheel
@@ -59,6 +63,8 @@ jobs:
           import tomllib
           from importlib.metadata import metadata
           from pathlib import Path
+
+          import watchpost_scan  # the opt-in scan module ships in the wheel
 
           expected = tomllib.loads(
               (Path(os.environ["GITHUB_WORKSPACE"]) / "pyproject.toml").read_text()
