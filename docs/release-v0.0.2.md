@@ -59,7 +59,8 @@ Results for `0.0.2` on 2026-10-21:
 |---|---|
 | Unittest suite | 100 tests passed on Python 3.11, 3.12, and 3.13 (Linux) |
 | Pytest | 100 tests and 205 subtests passed |
-| Windows | 100 tests ran on Windows 11 with Python 3.11: 97 passed, and 3 Linux-only tests were skipped |
+| Windows, local run | 100 tests ran on Windows 11 with Python 3.11: 97 passed, and 3 Linux-only tests were skipped |
+| Windows, CI | The `windows` job on GitHub's `windows-latest` runner with Python 3.13 passed the tests and a synthetic comparison at commit `42588d6` |
 | Ruff format and lint | Passed |
 | Source archive and wheel | Built as `0.0.2`; `twine check --strict` passed for both |
 | Archive contents | Required docs, examples, tests, license, changelog, and lockfile present; no `scans/`, `reports/`, `.venv`, `site`, or `.env` entries |
