@@ -293,20 +293,21 @@ mkdir -p scans
 uv run watchpost scan 192.0.2.10 192.0.2.32/28 --ports 22,80,443 --confirm-authorized
 ```
 
-Watchpost runs `nmap -sT -Pn -n --no-stylesheet -p PORTS -oX - TARGETS` and nothing else. You
-choose only the targets and ports, so scans from the same command can be compared. Targets must be
-IPv4 addresses or networks, at most 256 addresses in total. Hostnames are refused, so nothing
-depends on DNS. `--ports` is required, and `--confirm-authorized` records that you are authorized
-to scan every target. Watchpost cannot check that.
+Watchpost runs `nmap -sT -Pn --disable-arp-ping -n --no-stylesheet -p PORTS -oX - TARGETS` and
+nothing else. You choose only the targets and ports, so scans from the same command can be
+compared. Targets must be IPv4 addresses or networks, at most 256 addresses in total. Hostnames are
+refused, so nothing depends on DNS. `--ports` is required, and `--confirm-authorized` records that
+you are authorized to scan every target. Watchpost cannot check that.
 
 The XML is saved as a new file such as `scans/scan-20261022T142857Z.xml`, the same
 never-overwrite way as reports. Use `--output-dir` for another existing directory. Nothing is
 saved if Nmap fails or is interrupted. The command then pre-flights the new file like `inspect`
-and checks that it records the requested ports and addresses. If the file cannot be compared or
-does not match, it stays saved and the command exits 2 with the reason.
+and checks that it records the requested ports and every listed address, and no others. If the
+file cannot be compared or does not match, it stays saved and the command exits 2 with the reason.
 
-Host discovery is off, so every listed address is recorded as `up (user-set)`. That status means
-Nmap was told to scan the address, not that a device answered.
+Host discovery is off, including Nmap's ARP discovery on a local network, so every listed address
+is recorded as `up (user-set)`. That status means Nmap was told to scan the address, not that a
+device answered.
 
 ### Scheduling and scripts
 

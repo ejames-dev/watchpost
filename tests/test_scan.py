@@ -23,7 +23,8 @@ EXAMPLES = ROOT / "examples"
 BASELINE = (EXAMPLES / "baseline.xml").read_bytes()
 NMAP = "/opt/nmap/bin/nmap"
 TARGETS = ["192.0.2.10", "192.0.2.20"]
-COMMAND = [NMAP, "-sT", "-Pn", "-n", "--no-stylesheet", "-p", "22,80,443,3000", "-oX", "-"]
+PROFILE = ("-sT", "-Pn", "--disable-arp-ping", "-n", "--no-stylesheet")
+COMMAND = [NMAP, *PROFILE, "-p", "22,80,443,3000", "-oX", "-"]
 
 
 def run_watchpost(*args):
@@ -79,7 +80,7 @@ class TargetTests(unittest.TestCase):
                 scan_targets(values)
 
     def test_command_is_the_fixed_profile_with_xml_on_standard_output(self):
-        self.assertEqual(NMAP_PROFILE, ("-sT", "-Pn", "-n", "--no-stylesheet"))
+        self.assertEqual(NMAP_PROFILE, PROFILE)
         self.assertEqual(
             nmap_command(NMAP, TARGETS, ["22", "80", "443", "3000"]), [*COMMAND, *TARGETS]
         )
@@ -118,7 +119,7 @@ class ScanCommandTests(unittest.TestCase):
         [path] = self.saved()
         self.assertRegex(path.name, r"^scan-[0-9]{8}T[0-9]{6}Z\.xml$")
         self.assertEqual(path.read_bytes(), BASELINE)
-        self.assertIn(f"Running: {NMAP} -sT -Pn -n --no-stylesheet -p 22,80,443,3000", stdout)
+        self.assertIn(f"Running: {' '.join(COMMAND)} 192.0.2.10 192.0.2.20\n", stdout)
         self.assertIn(f"Scan saved to {str(path)!a}", stdout)
         self.assertIn(f"SHA-256: {hashlib.sha256(BASELINE).hexdigest()}", stdout)
         self.assertIn("4 declared ports: 22, 80, 443, 3000", stdout)
@@ -195,9 +196,23 @@ class ScanCommandTests(unittest.TestCase):
 
     def test_saved_scan_must_record_the_requested_scan(self):
         syn = BASELINE.replace(b'type="connect"', b'type="syn"')
+        no_hosts = re.sub(rb"\s*<host .*?</host>", b"", BASELINE, flags=re.DOTALL)
+        three = [*TARGETS, "192.0.2.30"]
         cases = [
             (BASELINE, TARGETS, "22,80", "declared ports 22, 80, 443, 3000, not 22, 80"),
             (BASELINE, ["192.0.2.10"], "22,80,443,3000", "unlisted addresses, such as 192.0.2.20"),
+            (
+                BASELINE,
+                three,
+                "22,80,443,3000",
+                "no records for listed addresses, such as 192.0.2.30",
+            ),
+            (
+                no_hosts,
+                TARGETS,
+                "22,80,443,3000",
+                "no records for listed addresses, such as 192.0.2.10",
+            ),
             (syn, TARGETS, "22,80,443,3000", "scan type syn, not connect"),
         ]
         parent = self.directory
@@ -239,15 +254,24 @@ class ScanCommandTests(unittest.TestCase):
         self.assertEqual(self.saved(), [destination])
 
     def test_offline_commands_do_not_load_the_scan_module(self):
+        pair = ["examples/baseline.xml", "examples/after.xml"]
+        commands = [
+            ["inspect", pair[0]],
+            ["compare", *pair, "--confirm-same-context", "--exit-code"],
+            ["history", *pair, "--confirm-same-context"],
+            ["verify", "examples/report.md", *pair],
+        ]
         code = (
-            "import sys, watchpost; "
-            "watchpost.main(['inspect', 'examples/baseline.xml']); "
-            "assert 'watchpost_scan' not in sys.modules"
+            "import sys, watchpost\n"
+            f"codes = [watchpost.main(args) for args in {commands!r}]\n"
+            "assert 'watchpost_scan' not in sys.modules\n"
+            "print(codes)\n"
         )
         result = subprocess.run(
             [sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True, check=False
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.endswith("[0, 1, 0, 0]\n"), result.stdout)
 
 
 class ExitCodeTests(unittest.TestCase):

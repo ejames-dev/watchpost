@@ -9,9 +9,10 @@ See [the scan milestone](docs/scan-milestone.md).
 ### Added
 
 - `watchpost scan TARGET... --ports PORTS --confirm-authorized` runs Nmap once with a fixed TCP
-  connect profile (`-sT -Pn -n --no-stylesheet`) against explicit IPv4 addresses or networks, at
-  most 256 addresses. It saves the XML as a new file in `scans/` or `--output-dir`, never
-  overwriting, and pre-flights it. It never runs on its own; schedule it with your own tools.
+  connect profile (`-sT -Pn --disable-arp-ping -n --no-stylesheet`) against explicit IPv4
+  addresses or networks, at most 256 addresses. It saves the XML as a new file in `scans/` or
+  `--output-dir`, never overwriting, then pre-flights it and checks that it records the requested
+  ports and every listed address. It never runs on its own; schedule it with your own tools.
 - `compare --exit-code` exits 1 when the snapshots differ in explicit records, for scripts and
   scheduled runs. It still requires `--confirm-same-context`.
 

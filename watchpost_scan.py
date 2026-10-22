@@ -15,10 +15,11 @@ from typing import BinaryIO
 MAX_SCAN_ADDRESSES = 256
 # Fixed so that saved scans stay comparable. Users choose targets and ports, nothing else.
 # -sT: TCP connect scan, the same with or without administrator rights.
-# -Pn: no host discovery, so every listed address is scanned however the scanner is privileged.
+# -Pn --disable-arp-ping: no host discovery, not even Nmap's implicit ARP on a local network, so
+# every listed address is scanned and recorded the same way however the scanner is privileged.
 # -n: no DNS lookups, so no traffic to name servers and no hostnames in the saved file.
 # --no-stylesheet: no reference to a local Nmap install path in the saved file.
-NMAP_PROFILE = ("-sT", "-Pn", "-n", "--no-stylesheet")
+NMAP_PROFILE = ("-sT", "-Pn", "--disable-arp-ping", "-n", "--no-stylesheet")
 
 
 def scan_targets(values: list[str]) -> list[str]:

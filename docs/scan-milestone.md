@@ -25,13 +25,14 @@ watchpost scan 192.0.2.10 192.0.2.32/28 --ports 22,80,443 --confirm-authorized
 Watchpost runs exactly this command, with no shell:
 
 ```text
-nmap -sT -Pn -n --no-stylesheet -p PORTS -oX - TARGETS
+nmap -sT -Pn --disable-arp-ping -n --no-stylesheet -p PORTS -oX - TARGETS
 ```
 
 | Option | Why it is fixed |
 |---|---|
 | `-sT` | TCP connect scan. It works the same with or without administrator rights. |
 | `-Pn` | No host discovery. Every listed address is scanned, however the scanner is privileged. |
+| `--disable-arp-ping` | Nmap skips even its implicit ARP discovery of hosts on a local network. |
 | `-n` | No DNS lookups: no traffic to name servers, and no hostnames in the saved file. |
 | `--no-stylesheet` | The saved file does not reference a local Nmap install path. |
 | `-oX -` | XML goes to a private temporary file through standard output, never to a path Nmap opens. |
@@ -57,10 +58,12 @@ and WSL. Nothing is saved when Nmap cannot start, is interrupted, exits with an 
 nothing.
 
 The command then runs the inspect pre-flight on the saved file and checks that it records a
-connect scan of the requested ports, with no records for addresses you did not list. It prints the
-file's SHA-256 hash, UTC window, scan metadata, and how many addresses have records. If the file
-cannot be compared or does not match the request, for example because a host timed out, it stays
-saved as evidence and the command exits 2 with the reason.
+connect scan of the requested ports, with a record for every listed address and none for others.
+Without host discovery, Nmap records every address of a listed network, including its network and
+broadcast addresses. The command prints the file's SHA-256 hash, UTC window, scan metadata, and how
+many addresses have records. If the file cannot be compared or does not match the request, for
+example because a host timed out, it stays saved as evidence and the command exits 2 with the
+reason.
 
 ### Reading scan results
 
@@ -183,8 +186,10 @@ The flag does not replace review. It still requires `--confirm-same-context`, re
   (including a competing writer), that failed, interrupted, and empty scans save nothing, that an
   unusable or mismatched scan stays saved and is named, that the offline commands never load the
   scan module, and every `--exit-code` outcome.
-- Manual check on Windows 11 with Nmap 7.992: two loopback scans of ports 1 and 135 were saved and
-  pre-flighted, compared with `--exit-code` (exit 0), and followed with `history`.
+- Manual check on Windows 11 with Nmap 7.992, loopback only: two scans of ports 1 and 135 were
+  saved and pre-flighted, compared with `--exit-code` (exit 0), and followed with `history`. A scan
+  of `127.0.0.0/30` recorded all four addresses, including the network and broadcast addresses, as
+  `up (user-set)` and passed the request check.
 - The script above ran twice under WSL with a stand-in `nmap` that prints the synthetic examples.
   The first run saved one scan and exited 0. The second saved another, compared the pair, saved a
   report that `verify` accepts, and exited 1. `systemd-analyze verify` accepted both units.

@@ -897,14 +897,14 @@ def _run_scan(args: argparse.Namespace) -> int:
         problems.append(
             f"declared ports {_port_ranges(snapshot.coverage)}, not {_port_ranges(ports)}"
         )
-    networks = [IPv4Network(target) for target in targets]
-    unlisted = [
-        address
-        for address in sorted(snapshot.inventory, key=IPv4Address)
-        if not any(IPv4Address(address) in network for network in networks)
-    ]
+    # Without host discovery, Nmap records every listed address, including network addresses.
+    listed = {str(address) for target in targets for address in IPv4Network(target)}
+    unlisted = sorted(snapshot.inventory.keys() - listed, key=IPv4Address)
     if unlisted:
         problems.append(f"records for unlisted addresses, such as {unlisted[0]}")
+    missing = sorted(listed - snapshot.inventory.keys(), key=IPv4Address)
+    if missing:
+        problems.append(f"no records for listed addresses, such as {missing[0]}")
     if problems:
         raise ValueError(
             f"Scan saved to {str(destination)!a}, but it does not match the request: "
@@ -989,9 +989,9 @@ def main(argv: list[str] | None = None) -> int:
         "scan",
         help="Opt-in: run Nmap once with a fixed TCP connect profile and save its XML.",
         description=(
-            "Run Nmap once with a fixed profile (-sT -Pn -n --no-stylesheet) against the IPv4 "
-            "targets you list, and save its XML as a new file. Watchpost never schedules or "
-            "repeats scans. Only scan networks you are authorized to assess."
+            "Run Nmap once with a fixed profile (-sT -Pn --disable-arp-ping -n --no-stylesheet) "
+            "against the IPv4 targets you list, and save its XML as a new file. Watchpost never "
+            "schedules or repeats scans. Only scan networks you are authorized to assess."
         ),
     )
     scan.add_argument(
