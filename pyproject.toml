@@ -21,7 +21,7 @@ Issues = "https://github.com/ejames-dev/watchpost/issues"
 watchpost = "watchpost:main"
 
 [tool.setuptools]
-py-modules = ["watchpost", "watchpost_report"]
+py-modules = ["watchpost", "watchpost_report", "watchpost_scan"]
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.11"]

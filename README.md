@@ -2,7 +2,8 @@
 
 Local-first, evidence-backed reviews of changes between saved Nmap scans.
 
-**Status: inspection, comparison, Markdown reporting, and synthetic walkthroughs implemented.**
+**Status: inspection, comparison, Markdown reporting, synthetic walkthroughs, and an opt-in scan
+command implemented.**
 Two saved XML files can produce a change-review report. The [three walkthroughs](docs/scenarios.md)
 cover expected deployment, unintended backend exposure, and an incomplete scan.
 [Published releases](https://github.com/ejames-dev/watchpost/releases) are listed on GitHub.
@@ -48,12 +49,17 @@ It deploys to Cloudflare as an assets-only Worker. See [the browser build guide]
 ## Scope
 
 Watchpost is for students and home-lab operators working on authorized networks.
-Inspect a saved Nmap XML file or compare two snapshots of explicit IPv4/TCP observations.
-Watchpost does not launch Nmap, discover devices, or send scan data anywhere.
-The CLI makes no network requests. The browser version only loads its own code from the
-site that serves it.
+Inspect a saved Nmap XML file or compare snapshots of explicit IPv4/TCP observations.
+`inspect`, `compare`, `history`, and `verify` read files you already saved and make no network
+requests. The browser version only loads its own code from the site that serves it.
+Watchpost never sends scan data anywhere.
 
-The approved target is in [the v0.1 project brief](docs/brief-v0.1.md).
+One command is different: the opt-in `watchpost scan` runs Nmap once, with one fixed TCP connect
+profile, against IPv4 targets you list and confirm you are authorized to scan. It never runs on
+its own. See [Run a scan](#run-a-scan-optional).
+
+The approved target is in [the v0.1 project brief](docs/brief-v0.1.md). The
+[scan milestone](docs/scan-milestone.md) records the one later change to the brief's rules.
 
 ## Try the synthetic demo
 
@@ -278,6 +284,48 @@ explicit record has `"record": "not observed"`, never `null`, so scripts cannot 
 for a closed port. The document also carries the notice, scan metadata with SHA-256 hashes, your
 context note and expectations, and the limitations.
 
+## Run a scan (optional)
+
+`watchpost scan` needs [Nmap](https://nmap.org/) and runs it once:
+
+```bash
+mkdir -p scans
+uv run watchpost scan 192.0.2.10 192.0.2.32/28 --ports 22,80,443 --confirm-authorized
+```
+
+Watchpost runs `nmap -sT -Pn -n --no-stylesheet -p PORTS -oX - TARGETS` and nothing else. You
+choose only the targets and ports, so scans from the same command can be compared. Targets must be
+IPv4 addresses or networks, at most 256 addresses in total. Hostnames are refused, so nothing
+depends on DNS. `--ports` is required, and `--confirm-authorized` records that you are authorized
+to scan every target. Watchpost cannot check that.
+
+The XML is saved as a new file such as `scans/scan-20261022T142857Z.xml`, the same
+never-overwrite way as reports. Use `--output-dir` for another existing directory. Nothing is
+saved if Nmap fails or is interrupted. The command then pre-flights the new file like `inspect`
+and checks that it records the requested ports and addresses. If the file cannot be compared or
+does not match, it stays saved and the command exits 2 with the reason.
+
+Host discovery is off, so every listed address is recorded as `up (user-set)`. That status means
+Nmap was told to scan the address, not that a device answered.
+
+### Scheduling and scripts
+
+Watchpost never schedules or repeats scans. To scan regularly, use your own scheduler: the
+[scan milestone](docs/scan-milestone.md) has cron, systemd, and Windows Task Scheduler examples.
+Keep one output directory per target and port list, so every file in it can be compared.
+
+In a script, `compare --exit-code` exits 1 when the snapshots differ in explicit records and 0 when
+they do not. It still requires `--confirm-same-context`, and refusals still exit 2.
+
+**A confirmation written into a schedule or script stands for every run.** Re-check it whenever
+the targets, the scanner's network location, or your authorization changes.
+
+| Exit code | Meaning |
+|---|---|
+| 0 | Success. With `--exit-code`, no differences in explicit records. |
+| 1 | `verify` found differences, or `compare --exit-code` found differences. |
+| 2 | Invalid input, a refusal, or a scan that failed or cannot be compared. |
+
 ## Practice the three scenarios
 
 Follow the [synthetic review walkthroughs](docs/scenarios.md). No live scan is required.
@@ -317,7 +365,8 @@ does not prove identical scan conditions, and no-change output is not a safety v
 ## Development
 
 Python 3.11+ and [uv](https://docs.astral.sh/uv/) are required for these commands.
-Dependency installation can need internet access. The application and tests run offline afterward.
+Dependency installation can need internet access. The tests and every command except `scan` run
+offline afterward.
 
 ```bash
 uv sync --dev --python 3.11
@@ -331,7 +380,7 @@ The tests use the standard library's `unittest`. Pytest is an optional developme
 
 ## Data handling
 
-- Only inspect data from networks you own or have permission to assess.
+- Only scan or inspect networks you own or have permission to assess.
 - All bundled XML examples and the sample report are synthetic and use documentation-only IP addresses.
 - Keep real inputs in `scans/` and reports in `reports/`. Both directories are ignored by Git.
 - Reports are not automatically anonymous. Review files before publishing them.
@@ -363,3 +412,5 @@ Beyond the v0.1 brief:
   their input files with SHA-256 hashes, finding keys, and `watchpost verify`.
 - [x] Check reviewer-written expectations, follow a series of snapshots with `history`, and print
   or save comparisons as JSON.
+- [x] Run one fixed, opt-in Nmap profile with `watchpost scan`, and report differences to scripts
+  with `compare --exit-code`. Scheduling stays with your own tools.
