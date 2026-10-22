@@ -2,14 +2,16 @@
 
 import argparse
 import hashlib
+import io
 import re
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from ipaddress import IPv4Address
 from itertools import groupby, pairwise, zip_longest
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath
+from typing import BinaryIO
 from xml.etree.ElementTree import Element, ParseError
 
 from defusedxml import ElementTree
@@ -26,8 +28,10 @@ from watchpost_report import (
     write_report,
 )
 
-# ponytail: cap snapshots at 10 MiB for small labs; stream if larger inputs are needed.
-MAX_XML_BYTES = 10 * 1024 * 1024
+# Snapshots are streamed, so memory follows the number of explicit records, not the file size.
+MAX_XML_MIB = 100
+MAX_XML_BYTES = MAX_XML_MIB * 1024 * 1024
+SIZE_ERROR = f"Snapshot exceeds the {MAX_XML_MIB} MiB limit. Use a smaller lab snapshot."
 MAX_EXPECT_BYTES = 1024 * 1024
 MAX_HISTORY = 50
 PORT_STATES = {"open", "closed", "filtered", "unfiltered", "open|filtered", "closed|filtered"}
@@ -42,13 +46,17 @@ PortRecords = dict[str, dict[int, str]]
 HostStatus = dict[str, tuple[str, str | None]]
 # Address -> Nmap state -> count from the host's grouped <extraports> records.
 GroupedCounts = dict[str, dict[str, int]]
+Records = tuple[PortRecords, PortRecords, HostStatus, GroupedCounts]
+# The nmaprun element without its hosts, the records read from them, and the input's SHA-256.
+Document = tuple[Element, Records, str]
 # (report line number, report line, expected line); None marks a missing line.
 Mismatch = tuple[int | None, str | None, str | None]
 
 
 @dataclass(frozen=True)
 class Snapshot:
-    source: Path
+    # A label for output: a local path, or a name supplied with in-memory XML.
+    source: PurePath
     started: datetime
     finished: datetime
     method: str
@@ -84,7 +92,7 @@ class Expectation:
 
 @dataclass(frozen=True)
 class Expectations:
-    source: Path
+    source: PurePath
     sha256: str
     entries: tuple[Expectation, ...]
 
@@ -97,36 +105,99 @@ def _read_bytes(path: Path, kind: str = "Snapshot") -> bytes:
         return source.read(MAX_XML_BYTES + 1)
 
 
-def _read_root(path: Path) -> Element:
-    """Safely load a completed TCP Nmap export file without resolving external content."""
-    return _parse_root(_read_bytes(path))
+def _read_document(path: Path) -> Document:
+    """Stream a saved Nmap export from disk. The file is never held in memory whole."""
+    if not path.is_file():
+        raise ValueError("Snapshot must be an existing regular file. Check the input path.")
+    if path.stat().st_size > MAX_XML_BYTES:
+        raise ValueError(SIZE_ERROR)
+    with path.open("rb") as source:
+        return _parse_stream(source)
 
 
-def _parse_root(data: bytes) -> Element:
-    """Safely parse completed TCP Nmap XML bytes without resolving external content."""
+def _parse_bytes(data: bytes) -> Document:
+    """Validate Nmap XML bytes already in memory with the same streaming parser."""
     if len(data) > MAX_XML_BYTES:
-        raise ValueError("Snapshot exceeds the 10 MiB limit. Use a smaller lab snapshot.")
+        raise ValueError(SIZE_ERROR)
+    return _parse_stream(io.BytesIO(data))
+
+
+class _HashingReader:
+    """Hash bytes as the parser reads them, and stop once the size limit is passed."""
+
+    def __init__(self, source: BinaryIO) -> None:
+        self.source, self.size, self.digest = source, 0, hashlib.sha256()
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self.source.read(size)
+        self.size += len(chunk)
+        if self.size > MAX_XML_BYTES:
+            raise ValueError(SIZE_ERROR)
+        self.digest.update(chunk)
+        return chunk
+
+
+def _xml_events(reader: _HashingReader) -> Iterator[tuple[str, Element]]:
+    """Parse with entities and external references refused, translating parser failures."""
     try:
-        root = ElementTree.fromstring(data, forbid_entities=True, forbid_external=True)
+        yield from ElementTree.iterparse(
+            reader, events=("start", "end"), forbid_entities=True, forbid_external=True
+        )
     except DefusedXmlException as exc:
         raise ValueError(
             "Unsafe XML. Entity declarations and external entities are not allowed."
         ) from exc
     except (ParseError, LookupError, ValueError) as exc:
+        if reader.size > MAX_XML_BYTES:
+            raise ValueError(SIZE_ERROR) from None
         raise ValueError(
             "Malformed XML or unsupported encoding. Use a complete UTF-8 Nmap export."
         ) from exc
 
-    if root.tag != "nmaprun" or root.get("scanner") != "nmap":
+
+def _parse_stream(source: BinaryIO) -> Document:
+    """Validate a completed TCP Nmap export in one pass, keeping records instead of the tree.
+
+    Each host element is dropped once its records are read. Errors keep the priority of a
+    whole-document parse: malformed XML, then the document checks, then the first bad host.
+    """
+    reader = _HashingReader(source)
+    records: Records = ({}, {}, {}, {})
+    root: Element | None = None
+    kept: list[Element] = []
+    host_error: ValueError | None = None
+    depth = 0
+    for event, element in _xml_events(reader):
+        if event == "start":
+            depth += 1
+            root = element if root is None else root
+            continue
+        depth -= 1
+        if depth != 1 or root is None:
+            continue
+        # A direct child of the root is complete. Keep only the small metadata elements.
+        if element.tag == "host" and host_error is None:
+            try:
+                _add_host(element, records)
+            except ValueError as exc:
+                host_error = exc
+        if element.tag in ("scaninfo", "runstats"):
+            kept.append(element)
+        # Emptying the root each time keeps this constant-time, however many children came before.
+        del root[:]
+
+    if root is None or root.tag != "nmaprun" or root.get("scanner") != "nmap":
         raise ValueError("Expected an Nmap XML export with an nmaprun root.")
+    root.extend(kept)
     finished = root.findall("runstats/finished")
     if len(finished) != 1 or finished[0].get("exit") != "success":
         raise ValueError("Scan is not confirmed complete. Use a successfully finished Nmap export.")
     scan_info = root.findall("scaninfo")
     if not scan_info or any(info.get("protocol") != "tcp" for info in scan_info):
         raise ValueError("Only scans with TCP scaninfo are supported. Use a TCP-only export.")
-
-    return root
+    if host_error is not None:
+        raise host_error
+    return root, records, reader.digest.hexdigest()
 
 
 def _reason(element: Element, record: str) -> str | None:
@@ -137,79 +208,68 @@ def _reason(element: Element, record: str) -> str | None:
     return reason
 
 
-def _records_from_xml(
-    root: Element,
-) -> tuple[PortRecords, PortRecords, HostStatus, GroupedCounts]:
-    """Read explicit port states, plus the reasons, host status, and grouped counts beside them."""
-    inventory: PortRecords = {}
-    port_reasons: PortRecords = {}
-    host_status: HostStatus = {}
-    grouped_ports: GroupedCounts = {}
-    for host in root.findall("host"):
-        if host.get("timedout") not in (None, "false", "0"):
-            raise ValueError("Host scan is incomplete (timeout). Use a completed snapshot.")
-        if host.find("address[@addrtype='ipv6']") is not None:
-            raise ValueError("Only IPv4 addresses are supported. Use an IPv4-only export.")
-        addresses = host.findall("address[@addrtype='ipv4']")
-        if len(addresses) != 1:
-            raise ValueError("Each host must have exactly one IPv4 address.")
-        try:
-            address = str(IPv4Address(addresses[0].get("addr", "")))
-        except ValueError as exc:
-            raise ValueError("Invalid IPv4 address. Check the host address in the export.") from exc
-        if address in inventory:
-            raise ValueError(f"Duplicate IPv4 host {address}. Use an unambiguous snapshot.")
-        statuses = host.findall("status")
-        if len(statuses) > 1 or any(status.get("state") not in HOST_STATES for status in statuses):
-            raise ValueError(
-                f"Host {address} must have at most one status: up, down, unknown, or skipped."
-            )
-        if statuses:
-            reason = _reason(statuses[0], f"host {address}")
-            host_status[address] = (statuses[0].attrib["state"], reason)
+def _add_host(host: Element, records: Records) -> None:
+    """Add one host's explicit port states, reasons, host status, and grouped counts."""
+    inventory, port_reasons, host_status, grouped_ports = records
+    if host.get("timedout") not in (None, "false", "0"):
+        raise ValueError("Host scan is incomplete (timeout). Use a completed snapshot.")
+    if host.find("address[@addrtype='ipv6']") is not None:
+        raise ValueError("Only IPv4 addresses are supported. Use an IPv4-only export.")
+    addresses = host.findall("address[@addrtype='ipv4']")
+    if len(addresses) != 1:
+        raise ValueError("Each host must have exactly one IPv4 address.")
+    try:
+        address = str(IPv4Address(addresses[0].get("addr", "")))
+    except ValueError as exc:
+        raise ValueError("Invalid IPv4 address. Check the host address in the export.") from exc
+    if address in inventory:
+        raise ValueError(f"Duplicate IPv4 host {address}. Use an unambiguous snapshot.")
+    statuses = host.findall("status")
+    if len(statuses) > 1 or any(status.get("state") not in HOST_STATES for status in statuses):
+        raise ValueError(
+            f"Host {address} must have at most one status: up, down, unknown, or skipped."
+        )
+    if statuses:
+        reason = _reason(statuses[0], f"host {address}")
+        host_status[address] = (statuses[0].attrib["state"], reason)
 
-        ports, reasons = {}, {}
-        for port in host.findall("ports/port"):
-            if port.get("protocol") != "tcp":
-                raise ValueError("Only TCP port observations are supported.")
-            port_id = port.get("portid", "")
-            if not port_id.isascii() or not port_id.isdecimal() or len(port_id) > 5:
-                raise ValueError("Invalid TCP port number. Expected a number from 0 to 65535.")
-            number = int(port_id)
-            if number > 65535:
-                raise ValueError("Invalid TCP port number. Expected a number from 0 to 65535.")
-            if number in ports:
-                raise ValueError(f"Duplicate TCP port {number} for {address}.")
-            states = port.findall("state")
-            if len(states) != 1 or states[0].get("state") not in PORT_STATES:
-                raise ValueError("Each explicit port must have one recognized Nmap port state.")
-            ports[number] = states[0].attrib["state"]
-            reason = _reason(states[0], f"{address} {number}/tcp")
-            if reason is not None:
-                reasons[number] = reason
-        # Counts only: grouped records are never expanded into per-port states.
-        grouped = {}
-        for record in host.findall("ports/extraports"):
-            state, count = record.get("state", ""), record.get("count", "")
-            if (
-                state not in PORT_STATES
-                or state in grouped
-                or not re.fullmatch(r"[0-9]{1,5}", count)
-            ):
-                raise ValueError(
-                    f"Unrecognized grouped port record for {address}. "
-                    "Expected one count for each recognized Nmap state."
-                )
-            grouped[state] = int(count)
-        inventory[address] = ports
-        port_reasons[address] = reasons
-        grouped_ports[address] = grouped
-    return inventory, port_reasons, host_status, grouped_ports
+    ports, reasons = {}, {}
+    for port in host.findall("ports/port"):
+        if port.get("protocol") != "tcp":
+            raise ValueError("Only TCP port observations are supported.")
+        port_id = port.get("portid", "")
+        if not port_id.isascii() or not port_id.isdecimal() or len(port_id) > 5:
+            raise ValueError("Invalid TCP port number. Expected a number from 0 to 65535.")
+        number = int(port_id)
+        if number > 65535:
+            raise ValueError("Invalid TCP port number. Expected a number from 0 to 65535.")
+        if number in ports:
+            raise ValueError(f"Duplicate TCP port {number} for {address}.")
+        states = port.findall("state")
+        if len(states) != 1 or states[0].get("state") not in PORT_STATES:
+            raise ValueError("Each explicit port must have one recognized Nmap port state.")
+        ports[number] = states[0].attrib["state"]
+        reason = _reason(states[0], f"{address} {number}/tcp")
+        if reason is not None:
+            reasons[number] = reason
+    # Counts only: grouped records are never expanded into per-port states.
+    grouped = {}
+    for record in host.findall("ports/extraports"):
+        state, count = record.get("state", ""), record.get("count", "")
+        if state not in PORT_STATES or state in grouped or not re.fullmatch(r"[0-9]{1,5}", count):
+            raise ValueError(
+                f"Unrecognized grouped port record for {address}. "
+                "Expected one count for each recognized Nmap state."
+            )
+        grouped[state] = int(count)
+    inventory[address] = ports
+    port_reasons[address] = reasons
+    grouped_ports[address] = grouped
 
 
 def read_inventory(path: Path) -> dict[str, dict[int, str]]:
     """Read explicit IPv4/TCP observations. Do not expand aggregated port counts."""
-    return _records_from_xml(_read_root(path))[0]
+    return _read_document(path)[1][0]
 
 
 def _scan_time(value: str) -> datetime:
@@ -253,17 +313,16 @@ def _port_ranges(ports: Iterable[int], limit: int = 10) -> str:
 
 def read_snapshot(path: Path) -> Snapshot:
     """Read the stronger metadata needed for a conservative comparison."""
-    return parse_snapshot(_read_bytes(path), path)
+    return _snapshot_from_document(_read_document(path), path)
 
 
-def parse_snapshot(data: bytes, source: Path) -> Snapshot:
+def parse_snapshot(data: bytes, source: PurePath) -> Snapshot:
     """Validate snapshot bytes already in memory; source is only a label for output."""
-    root = _parse_root(data)
-    return _snapshot_from_root(root, source, hashlib.sha256(data).hexdigest())
+    return _snapshot_from_document(_parse_bytes(data), source)
 
 
-def _snapshot_from_root(root: Element, source: Path, sha256: str = "") -> Snapshot:
-    inventory, port_reasons, host_status, grouped_ports = _records_from_xml(root)
+def _snapshot_from_document(document: Document, source: PurePath) -> Snapshot:
+    root, (inventory, port_reasons, host_status, grouped_ports), sha256 = document
     scans = root.findall("scaninfo")
     if len(scans) != 1 or scans[0].get("type") not in {"connect", "syn"}:
         raise ValueError("Comparison supports exactly one TCP connect or SYN scan per snapshot.")
@@ -489,8 +548,9 @@ def compare_report(
             "Confirm the same scan location, intended targets, and other scan settings."
         )
     note = _context_note(context_note)
-    before = parse_snapshot(before_xml, Path(before_name))
-    after = parse_snapshot(after_xml, Path(after_name))
+    # Names are labels, not local paths, so they read the same on every platform.
+    before = parse_snapshot(before_xml, PurePosixPath(before_name))
+    after = parse_snapshot(after_xml, PurePosixPath(after_name))
     changes = compare_snapshots(before, after, same_context_confirmed=same_context_confirmed)
     return render_markdown(before, after, changes, context_note=note)
 
@@ -501,7 +561,9 @@ def verify_report(
     """Regenerate a saved report from its snapshots and list the evidence lines that differ."""
     data = _read_bytes(report, "Report")
     if len(data) > MAX_XML_BYTES:
-        raise ValueError("Report exceeds the 10 MiB limit. Use a report saved by compare.")
+        raise ValueError(
+            f"Report exceeds the {MAX_XML_MIB} MiB limit. Use a report saved by compare."
+        )
     try:
         text = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
@@ -565,8 +627,13 @@ def _grouped_side(snapshot: Snapshot, address: str) -> str:
     return _grouped_text(snapshot.grouped_ports.get(address, {}))
 
 
-def _format_inspection(root: Element, source: Path) -> str:
-    inventory, port_reasons, host_status, grouped_ports = _records_from_xml(root)
+def inspect_text(snapshot_xml: bytes, *, name: str) -> str:
+    """Return the inspect output for one in-memory snapshot. No file or network access."""
+    return _format_inspection(_parse_bytes(snapshot_xml), PurePosixPath(name))
+
+
+def _format_inspection(document: Document, source: PurePath) -> str:
+    _, (inventory, port_reasons, host_status, grouped_ports), _ = document
     lines = ["IPv4/TCP observations (not a security verdict)"]
     if not inventory:
         lines.append("No IPv4 host observations.")
@@ -588,7 +655,7 @@ def _format_inspection(root: Element, source: Path) -> str:
     )
     # The records above already passed, so any failure here is comparison metadata.
     try:
-        snapshot = _snapshot_from_root(root, source)
+        snapshot = _snapshot_from_document(document, source)
     except ValueError as exc:
         lines.append(f"  Ready to compare: no. {exc}")
     else:
@@ -597,8 +664,8 @@ def _format_inspection(root: Element, source: Path) -> str:
                 f"  UTC window: {_window(snapshot)}",
                 f"  Scan: TCP {snapshot.method}; Nmap {snapshot.version}; "
                 f"{len(snapshot.coverage)} declared ports: {_port_ranges(snapshot.coverage)}",
-                "  Ready to compare: yes. compare also checks the other file and requires "
-                "--confirm-same-context.",
+                "  Ready to compare: yes. Comparing still checks the other file and needs you "
+                "to confirm the scan context.",
             ]
         )
     return "\n".join(lines)
@@ -851,7 +918,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "compare":
             return _run_compare(args)
-        inspection = _format_inspection(_read_root(args.snapshot), args.snapshot)
+        inspection = _format_inspection(_read_document(args.snapshot), args.snapshot)
     except (OSError, ValueError) as exc:
         parser.exit(2, f"watchpost: error: {exc}\n")
 

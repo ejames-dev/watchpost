@@ -6,7 +6,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from watchpost import main
+from watchpost import MAX_XML_BYTES, MAX_XML_MIB, main
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 BEFORE, AFTER = EXAMPLES / "baseline.xml", EXAMPLES / "after.xml"
@@ -104,7 +104,10 @@ class VerifyTests(unittest.TestCase):
         self.save_report()
         not_utf8 = self.directory / "binary.md"
         not_utf8.write_bytes(b"\xff\xfe not UTF-8")
+        oversized = self.directory / "oversized.md"
+        oversized.write_bytes(b" " * (MAX_XML_BYTES + 1))
         cases = (
+            ((oversized, BEFORE, AFTER), f"Report exceeds the {MAX_XML_MIB} MiB limit"),
             ((self.directory / "missing.md", BEFORE, AFTER), "Report must be an existing"),
             ((not_utf8, BEFORE, AFTER), "UTF-8"),
             ((self.report, AFTER, BEFORE), "reversed"),

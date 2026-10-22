@@ -1,6 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.0.2
+
+Second version: richer evidence, review tools, and the browser build, all within the
+[v0.1 project brief](docs/brief-v0.1.md)'s rules.
+See [the release-readiness checklist](docs/release-v0.0.2.md).
+This changelog entry alone does not establish tag or registry publication.
 
 ### Added
 
@@ -33,9 +38,21 @@
 - `compare --format json` prints or saves the comparison as JSON. A missing record is the string
   `"not observed"`, never `null`.
 - Synthetic expectation files for scenarios 1 and 2, and a third snapshot, `examples/rollback.xml`.
+- `inspect_text` returns `inspect` output for in-memory XML. The browser page uses it to inspect
+  one scan with the same pre-flight, and it can load the synthetic examples from the site itself.
+- The browser page works offline after the first visit. A same-origin service worker caches the
+  site's own files; the content security policy still blocks every other origin.
+- A Windows CI job runs the full test suite. Tests that depend on Linux-only behavior are skipped
+  on Windows with the reason stated.
 
 ### Changed
 
+- Snapshots are parsed in one streaming pass that keeps records instead of the XML tree, and the
+  size limit rises from 10 MiB to 100 MiB. Error priority is unchanged.
+- In-memory source names are platform-independent labels, so reports match on every platform.
+- Text files check out with LF line endings everywhere.
+- The inspect pre-flight's last line no longer names a CLI flag, so it reads the same in the
+  browser.
 - Malformed host status, reason, or grouped port records are rejected like other malformed records.
 - `examples/report.md` is regenerated with the new evidence lines.
 

@@ -4,7 +4,7 @@ const GLUE = `
 import sys
 
 sys.path.insert(0, "/watchpost")
-from watchpost import compare_report
+from watchpost import MAX_XML_BYTES, compare_report, inspect_text
 
 
 def watchpost_compare(before, after, before_name, after_name, confirmed, note):
@@ -20,6 +20,13 @@ def watchpost_compare(before, after, before_name, after_name, confirmed, note):
     except ValueError as exc:
         return False, str(exc)
     return True, report
+
+
+def watchpost_inspect(data, name):
+    try:
+        return True, inspect_text(data.to_bytes(), name=name)
+    except ValueError as exc:
+        return False, str(exc)
 `;
 
 /**
@@ -34,15 +41,25 @@ export async function startWatchpost(loadPyodide, { indexURL, sources, wheel }) 
   }
   pyodide.unpackArchive(wheel, "wheel", { extractDir: "/watchpost" });
   pyodide.runPython(GLUE);
-  const compare = pyodide.globals.get("watchpost_compare");
 
-  return (before, after, beforeName, afterName, confirmed, note = "") => {
-    const result = compare(before, after, beforeName, afterName, confirmed, note);
-    try {
-      const [ok, text] = result.toJs();
-      return { ok, text };
-    } finally {
-      result.destroy();
-    }
+  // Each Python function returns (ok, text); copy it out and free the proxy.
+  const wrap = (name) => {
+    const call = pyodide.globals.get(name);
+    return (...args) => {
+      const result = call(...args);
+      try {
+        const [ok, text] = result.toJs();
+        return { ok, text };
+      } finally {
+        result.destroy();
+      }
+    };
+  };
+  const compare = wrap("watchpost_compare");
+  return {
+    compare: (before, after, beforeName, afterName, confirmed, note = "") =>
+      compare(before, after, beforeName, afterName, confirmed, note),
+    inspect: wrap("watchpost_inspect"),
+    maxBytes: pyodide.globals.get("MAX_XML_BYTES"),
   };
 }

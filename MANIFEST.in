@@ -14,4 +14,5 @@ include docs/reporting-milestone.md
 include docs/expectations-milestone.md
 include docs/scenarios.md
 include docs/release-v0.0.1.md
+include docs/release-v0.0.2.md
 include docs/publishing.md

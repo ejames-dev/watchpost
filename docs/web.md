@@ -1,8 +1,12 @@
 # Browser build
 
-The browser build runs the same `compare_report` function as the CLI inside
+The browser build runs the same `compare_report` and `inspect_text` functions as the CLI inside
 [Pyodide](https://pyodide.org/) (CPython compiled to WebAssembly). Scan files are read
 with the File API and passed to Python in memory. Nothing is uploaded.
+
+The page compares two scans, inspects one scan with the same pre-flight as `watchpost inspect`,
+and can load the two synthetic example scans that the site serves. Loading the examples leaves the
+scan-context confirmation unticked: the user still confirms it before comparing.
 
 ## How it stays local
 
@@ -15,6 +19,10 @@ with the File API and passed to Python in memory. Nothing is uploaded.
   `defusedxml` wheel with the same SHA-256 as `uv.lock`.
 - Source names in reports are bare filenames from the browser, never local paths.
 - The optional context note is only written into the report, as an escaped literal.
+- A service worker (`sw.js`, allowed by `worker-src 'self'`) caches the site's own files after
+  the first visit, so the page also works offline. It answers only same-origin GET requests.
+  The build fills in its file list and a cache name tied to the files' contents, so a new
+  deployment replaces the old cache.
 
 ## Build and test locally
 
@@ -27,8 +35,10 @@ python3 -m http.server -d site 8000
 ```
 
 The smoke test loads the built Pyodide runtime in Node and checks that the browser report is
-byte-identical to `examples/report.md`. `http.server` does not apply `_headers`, so use it
-only for a quick look. Cloudflare applies the headers on deployment.
+byte-identical to `examples/report.md`. It also checks inspection, the served examples, and that
+the service worker's file list matches the build. `http.server` does not apply `_headers`, so use
+it only for a quick look. Cloudflare applies the headers on deployment. On Windows, Python's
+server can send `.mjs` files as `text/plain`, which browsers refuse; serve the site from WSL.
 
 ## Deploy to Cloudflare
 

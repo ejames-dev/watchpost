@@ -154,6 +154,16 @@ button.secondary {
 button.secondary:hover { border-color: var(--accent); }
 
 #result, #error { margin-top: 2.5rem; }
+#inspection, #inspect-error { margin-top: 1.25rem; }
+
+#inspect-section {
+  margin-top: 3.5rem;
+  padding-top: 2rem;
+  border-top: 1px solid var(--line);
+}
+#inspect-section .drop { max-width: 26rem; }
+#inspect-section .actions { margin-top: 1rem; }
+.hint { margin: 0.35rem 0 1.25rem; color: var(--muted); }
 
 .result-bar {
   display: flex;
@@ -165,7 +175,7 @@ button.secondary:hover { border-color: var(--accent); }
 }
 .result-actions { display: flex; gap: 0.5rem; }
 
-#report {
+#report, #inspection {
   margin: 0;
   max-height: 70vh;
   overflow: auto;
@@ -178,13 +188,13 @@ button.secondary:hover { border-color: var(--accent); }
   overflow-wrap: anywhere;
 }
 
-#error {
+#error, #inspect-error {
   padding: 1rem 1.25rem;
   background: var(--warn-bg);
   color: var(--warn-ink);
   border-radius: 10px;
 }
-#error p { margin: 0.35rem 0 0; }
+#error p, #inspect-error p { margin: 0.35rem 0 0; }
 
 footer {
   margin-top: 3.5rem;

@@ -266,7 +266,11 @@ class ReportCommandTests(unittest.TestCase):
             self.assertEqual(result.stderr, "")
             self.assertIn("Report saved to", result.stdout)
             self.assertIn("# Watchpost change review", output.read_text(encoding="utf-8"))
-            self.assertEqual(output.read_bytes(), (EXAMPLES / "report.md").read_bytes())
+            # Only the path labels depend on the platform; every other byte matches the sample.
+            expected = (EXAMPLES / "report.md").read_bytes()
+            for name in ("examples/baseline.xml", "examples/after.xml"):
+                expected = expected.replace(ascii(name).encode(), ascii(str(Path(name))).encode())
+            self.assertEqual(output.read_bytes(), expected)
             self.assertNotIn(b"\r", output.read_bytes())
             self.assertEqual(list(Path(directory).iterdir()), [output])
 
@@ -384,6 +388,7 @@ class ReportCommandTests(unittest.TestCase):
         self.assertNotIn("**Later evidence:** `closed`", report)
         self.assertNotIn("UNTRUSTED_", report)
 
+    @unittest.skipUnless(os.name == "posix", "Windows filenames cannot contain control characters.")
     def test_report_runs_repeatably_offline_and_escapes_terminal_output_path(self):
         reports = []
         with (
@@ -409,12 +414,16 @@ class ReportFileTests(unittest.TestCase):
         self.directory = Path(directory.name)
         self.output = self.directory / "report.md"
 
-    def test_new_report_is_private_and_complete(self):
+    def test_new_report_is_complete(self):
         content = "# Review\n\nEarlier → later.\n"
         write_report(self.output, content)
         self.assertEqual(self.output.read_bytes(), content.encode("utf-8"))
-        self.assertEqual(stat.S_IMODE(self.output.stat().st_mode) & 0o077, 0)
         self.assertEqual(list(self.directory.iterdir()), [self.output])
+
+    @unittest.skipUnless(os.name == "posix", "Windows ignores POSIX modes; folder access applies.")
+    def test_new_report_is_private_on_posix(self):
+        write_report(self.output, "# Review\n")
+        self.assertEqual(stat.S_IMODE(self.output.stat().st_mode) & 0o077, 0)
 
     def test_existing_files_directories_and_links_are_preserved(self):
         notes = self.directory / "notes.md"
